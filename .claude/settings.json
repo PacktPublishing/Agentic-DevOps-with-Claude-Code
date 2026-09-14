@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Read(./**)",
+      "Edit(./**)",
+      "Write(./**)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git log:*)",
+      "Bash(git switch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git tag:*)",
+      "Bash(kubectl get:*)",
+      "Bash(kubectl describe:*)",
+      "Bash(kubectl logs:*)",
+      "Bash(kubectl explain:*)",
+      "Bash(kubectl api-resources:*)",
+      "Bash(kubectl diff:*)",
+      "Bash(argocd app get:*)",
+      "Bash(argocd app list:*)",
+      "Bash(argocd app diff:*)",
+      "Bash(helm template:*)",
+      "Bash(helm show:*)",
+      "Bash(helm lint:*)"
+    ],
+    "ask": [
+      "Bash(kubectl apply:*)",
+      "Bash(kubectl create:*)",
+      "Bash(kubectl delete:*)",
+      "Bash(kubectl patch:*)",
+      "Bash(kubectl replace:*)",
+      "Bash(kubectl rollout:*)",
+      "Bash(helm install:*)",
+      "Bash(helm upgrade:*)",
+      "Bash(helm uninstall:*)",
+      "Bash(argocd app sync:*)",
+      "Bash(argocd app delete:*)",
+      "Bash(git push:*)"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/credentials*)",
+      "Edit(.claude/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/audit.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/audit.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

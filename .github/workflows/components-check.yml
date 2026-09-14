@@ -1,0 +1,30 @@
+# Fails if any components.yaml entry lacks a pinned version.
+# No count assertion: the component set is the right set, not a target number.
+name: components-check
+
+on:
+  push:
+    paths:
+      - components.yaml
+      - scripts/check_components.py
+      - scripts/test_check_components.py
+      - .github/workflows/components-check.yml
+  pull_request:
+    paths:
+      - components.yaml
+      - scripts/check_components.py
+      - scripts/test_check_components.py
+      - .github/workflows/components-check.yml
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml pytest
+      - run: python scripts/check_components.py
+      - run: pytest test_check_components.py -q
+        working-directory: scripts

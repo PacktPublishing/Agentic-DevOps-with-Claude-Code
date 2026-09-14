@@ -1,0 +1,42 @@
+# Claude Code audit logs (generated at runtime by .claude/hooks/audit.sh)
+.claude/audit/
+.claude/settings.local.json
+.claude/settings.local.json.tmp.*
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Secrets and local env (never committed; the repo holds zero real credentials)
+.env
+*.env
+!.env.example
+
+# OS noise
+.DS_Store
+
+# Terraform. State can hold sensitive values, and terraform.tfvars is yours.
+# Keep provision/terraform.tfstate: it is the only thing that can cleanly destroy
+# what you created. provision/README.md says what to do if you lose it.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+
+# The chapter 2 lab writes its output here. It is generated, not source.
+out/
+
+# Scratch
+/tmp/
+tmp/
+
+# uv.lock appears because the root pyproject.toml, which exists to scope pytest
+# collection, makes uv treat this directory as a project. The repo declares no
+# runtime dependencies, so the lock is noise.
+uv.lock

@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored; this file is not.
+#
+#   cp provision/terraform.tfvars.example provision/terraform.tfvars
+
+region = "us-west-2"
+
+# Becomes the cluster name and the EXPECTED_CONTEXT the tests check against.
+name = "agentic-devops"
+
+kubernetes_version = "1.35"
+
+# The Kubernetes API endpoint is public and authenticated. Narrow it to your own address
+# if the cluster will outlive a single sitting.
+# endpoint_public_access_cidrs = ["203.0.113.4/32"]

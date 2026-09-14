@@ -1,0 +1,50 @@
+# ABOUTME: Runs the cluster-free test suite on every push and pull request, so the assertions that
+# ABOUTME: guard the manifests and version pins actually gate a change instead of only existing.
+#
+# These tests need no cluster. The ones that do are marked `integration` and skip themselves when
+# KUBECONFIG_FILE is unset, so the whole suite is safe to run in CI and reports the cluster-bound
+# ones as skipped rather than failing.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The publication guards matter most long after anyone remembers the rule, so run them
+  # on a schedule as well as on a change.
+  schedule:
+    - cron: "17 6 * * 1"
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # jsonschema validates the custom resources against the CRDs vendored in charts-vendor;
+      # requests is imported by the probe scripts whose pure logic is under test.
+      - run: pip install pytest pyyaml jsonschema requests
+      - name: Run the cluster-free suite
+        # testpaths in pyproject.toml scopes collection, so a bare pytest is the right invocation
+        # and stays correct as tests are added.
+        run: pytest -q
+
+  publication-guards:
+    # What must stay true of a public companion repository: no credentials, no account ids, nothing
+    # naming a third party, and no citation of a file that is not here. Split into its own job so a
+    # failure says plainly which of the two problems it is.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest pyyaml
+      - name: Check nothing private or dangling is tracked
+        run: >
+          pytest -q
+          tests/test_no_account_ids.py
+          tests/test_no_leaked_context.py
+          tests/test_no_dangling_paths.py

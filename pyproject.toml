@@ -1,0 +1,38 @@
+# ABOUTME: Root pytest configuration. Scopes a bare `pytest` to the platform suite, so the most
+# ABOUTME: obvious command a reader types runs the tests rather than aborting during collection.
+#
+# testpaths names the two places tests live: tests/ for the phase gates and the manifest checks,
+# and the two script-local suites that cover the probe helpers.
+#
+# The cluster-bound tests skip themselves when KUBECONFIG_FILE is unset, so a bare `pytest` is safe
+# with no cluster and reports those as skipped rather than failing.
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+    "scripts/test_probes.py",
+    "scripts/test_check_components.py",
+]
+# An explicitly named path still recurses, so keep collection out of the vendored charts and
+# anything a build drops beside them.
+norecursedirs = [
+    "charts-vendor",
+    ".git",
+    "*.egg-info",
+]
+# The chapter 2 lab test is meant to be red until you do the lab, so a bare `pytest` leaves it
+# alone and every other run stays meaningful. Naming it explicitly still runs it, which is exactly
+# what the chapter prints: python -m pytest tests/test_inventory_summary.py -q
+addopts = "--ignore=tests/test_inventory_summary.py"
+markers = [
+    "integration: needs a fully built cluster and in-cluster traffic",
+]
+
+# What the suite needs. `uv run --group test pytest` installs these and runs everything;
+# a bare `pytest` runs whatever your environment already has and skips the rest.
+[dependency-groups]
+test = [
+    "pytest>=8.0",
+    "pyyaml>=6.0",
+    "jsonschema>=4.0",
+    "requests>=2.32",
+]

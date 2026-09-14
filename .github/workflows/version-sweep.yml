@@ -1,0 +1,55 @@
+# ABOUTME: Monthly drift report against upstream, opened as an issue, so the maintenance cadence
+# ABOUTME: runs on a schedule rather than on somebody remembering to look.
+#
+# Deliberately does NOT fail. This platform pins on purpose and holds two pins for measured reasons,
+# so red-on-drift would train everyone to ignore it. It opens an issue with the table instead: the
+# job is to make drift visible, not to block a merge on a number changing upstream.
+name: version-sweep
+
+on:
+  schedule:
+    # 07:00 UTC on the 1st. Monthly matches the cadence in docs/version-maintenance.md for the
+    # fast movers; the Kubernetes-minor work is a bigger, separate pass.
+    - cron: "0 7 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: Measure drift
+        id: sweep
+        run: |
+          {
+            echo "Measured against upstream on $(date -u +%Y-%m-%d)."
+            echo
+            python scripts/version_sweep.py --format markdown
+            echo
+            echo '<details><summary>Held pins and unresolved sources</summary>'
+            echo
+            echo '```'
+            python scripts/version_sweep.py | grep -E '^  (HELD|\?)' || true
+            echo '```'
+            echo '</details>'
+            echo
+            echo "See docs/version-maintenance.md for the cadence and the order to move them in."
+            echo "A bump is done when the phase suite passes against it, not when the number changes."
+          } > sweep.md
+          cat sweep.md
+      - name: Open the drift issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "Version drift: $(date -u +%Y-%m)" \
+            --label version-drift \
+            --body-file sweep.md
