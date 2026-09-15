@@ -1,1 +1,1 @@
-# Agentic-DevOps-with-Claude
+# Agentic-DevOps-with-Claude-Code
