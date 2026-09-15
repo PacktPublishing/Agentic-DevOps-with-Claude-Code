@@ -1,0 +1,53 @@
+{
+  "_comment": [
+    "The approved read-only source for the chapter 2 lab. Synthetic throughout: addresses are from",
+    "the RFC 5737 documentation range and no host here exists. Treat it as the system of record for",
+    "that phase, as spec/phases/example-inventory.md requires.",
+    "",
+    "Note the snmp_community field. It is here on purpose. The phase contract says the output must",
+    "contain no credentials, which is only a meaningful assertion if the input has one to leak."
+  ],
+  "collected_at": "2026-01-15T09:00:00Z",
+  "devices": [
+    {
+      "id": "dev-0001",
+      "hostname": "core-sw-01",
+      "management_address": "192.0.2.11",
+      "role": "core-switch",
+      "site": "site-a",
+      "snmp_community": "NOT-A-REAL-SECRET-DO-NOT-COPY"
+    },
+    {
+      "id": "dev-0002",
+      "hostname": "core-sw-02",
+      "management_address": "192.0.2.12",
+      "role": "core-switch",
+      "site": "site-a",
+      "snmp_community": "NOT-A-REAL-SECRET-DO-NOT-COPY"
+    },
+    {
+      "id": "dev-0003",
+      "hostname": "edge-rtr-01",
+      "management_address": "192.0.2.21",
+      "role": "edge-router",
+      "site": "site-a",
+      "snmp_community": "NOT-A-REAL-SECRET-DO-NOT-COPY"
+    },
+    {
+      "id": "dev-0004",
+      "hostname": "edge-rtr-02",
+      "management_address": "198.51.100.21",
+      "role": "edge-router",
+      "site": "site-b",
+      "snmp_community": "NOT-A-REAL-SECRET-DO-NOT-COPY"
+    },
+    {
+      "id": "dev-0005",
+      "hostname": "access-sw-11",
+      "management_address": "198.51.100.31",
+      "role": "access-switch",
+      "site": "site-b",
+      "snmp_community": "NOT-A-REAL-SECRET-DO-NOT-COPY"
+    }
+  ]
+}

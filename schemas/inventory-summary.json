@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PacktPublishing/Agentic-DevOps-with-Claude-Code/schemas/inventory-summary.json",
+  "title": "Inventory summary",
+  "description": "The structured output of the chapter 2 example phase. Every device carries a stable identifier and a management address, addresses do not repeat, and no credential from the source fixture appears anywhere.",
+  "type": "object",
+  "required": ["generated_at", "source", "device_count", "devices"],
+  "additionalProperties": false,
+  "properties": {
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "description": "The approved source this summary was derived from. The phase forbids enrichment from anywhere else.",
+      "const": "fixtures/device-inventory.json"
+    },
+    "device_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "devices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "hostname", "management_address", "role", "site"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^dev-[0-9]{4}$"
+          },
+          "hostname": {
+            "type": "string",
+            "minLength": 1
+          },
+          "management_address": {
+            "type": "string",
+            "pattern": "^((25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$"
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1
+          },
+          "site": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

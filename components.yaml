@@ -1,0 +1,544 @@
+# components.yaml
+# Single source of truth for the platform component set.
+# Every entry carries a pinned version. CI fails if any entry lacks one.
+# Versions resolved June 15, 2026. Re-resolve the week of July 13, then freeze.
+# See docs/reference/research-findings-june-2026.md for sources and gotchas.
+#
+# Schema per component:
+#   name           kebab-case identifier
+#   plane          foundation | ai | self-service
+#   project_url    upstream project
+#   install_method helm | helm-oci | kustomize | kubectl | library | cli
+#   chart_repo     chart repository (helm/helm-oci), else null
+#   chart_name     chart name, else null
+#   chart_version  pinned chart version, else null
+#   app_version    pinned application/image version
+#   namespace      target namespace
+#   module         workshop module the component appears in
+#   notes          honest maturity and integration notes
+#   bundled        optional. When one install delivers several distinct
+#                  capabilities (an umbrella chart, a portal with plugins),
+#                  list them here, each with name and version, so the contents
+#                  stay queryable instead of buried in notes.
+
+metadata:
+  resolved_on: "2026-06-15"
+  platform: amazon-eks
+  kubernetes_version: "1.35 or 1.36"
+  freeze_target_week: "2026-07-13"
+
+components:
+
+  # --- Foundation: developer portal ---
+  - name: backstage
+    display_name: "Backstage"
+    plane: foundation
+    project_url: https://backstage.io
+    install_method: helm
+    chart_repo: https://backstage.github.io/charts
+    chart_name: backstage
+    chart_version: "2.8.2"
+    app_version: "1.51.2"
+    namespace: backstage
+    module: 1
+    notes: >
+      One Backstage install (one custom image) delivering the capabilities in
+      bundled below. Build a custom image; the chart's built-in image is demo-only.
+      New Frontend System is the default in 2026. Scaffolder templates use
+      scaffolder.backstage.io/v1beta3 with Nunjucks.
+    bundled:
+      - name: backstage-techdocs
+        version: "1.51.2"
+      - name: backstage-software-catalog
+        version: "1.51.2"
+      - name: backstage-scaffolder
+        version: "1.51.2"
+      - name: backstage-github-oauth
+        version: "1.51.2"
+      - name: backstage-argocd-plugin
+        version: "2.12.5"   # @roadiehq/backstage-plugin-argo-cd; backend 4.8.0
+
+  # --- Foundation: GitOps and the Argo stack ---
+  - name: argo-cd
+    display_name: "Argo CD"
+    plane: foundation
+    project_url: https://argo-cd.readthedocs.io
+    install_method: helm
+    chart_repo: https://argoproj.github.io/argo-helm
+    chart_name: argo-cd
+    chart_version: "9.5.22"
+    app_version: "v3.4.4"
+    namespace: argocd
+    module: 1
+    notes: >
+      3.x line. ApplicationSets are built in. Server-side apply and RBAC changes
+      since 3.0. Bootstrap with kubectl apply --server-side --force-conflicts.
+
+  - name: argo-workflows
+    display_name: "Argo Workflows"
+    plane: foundation
+    project_url: https://argo-workflows.readthedocs.io
+    install_method: helm
+    chart_repo: https://argoproj.github.io/argo-helm
+    chart_name: argo-workflows
+    chart_version: "1.0.16"
+    app_version: "v4.0.6"
+    namespace: argo
+    module: 1
+    notes: v4.0 removed the Python SDK and singular sync primitives. Full-validation CRDs are large; install server-side.
+
+  - name: argo-events
+    display_name: "Argo Events"
+    plane: foundation
+    project_url: https://argoproj.github.io/argo-events
+    install_method: helm
+    chart_repo: https://argoproj.github.io/argo-helm
+    chart_name: argo-events
+    chart_version: "2.4.22"
+    app_version: "v1.9.10"
+    namespace: argo-events
+    module: 1
+    notes: Confirm the bundled appVersion before the freeze; the chart can lag the upstream tag.
+
+  - name: argo-rollouts
+    display_name: "Argo Rollouts"
+    plane: foundation
+    project_url: https://argo-rollouts.readthedocs.io
+    install_method: helm
+    chart_repo: https://argoproj.github.io/argo-helm
+    chart_name: argo-rollouts
+    chart_version: "2.41.0"
+    app_version: "v1.9.0"
+    namespace: argo-rollouts
+    module: 1
+    notes: Dashboard supports Gateway API HTTPRoute.
+
+  # --- Foundation: secrets, policy, scaling ---
+  - name: openbao
+    display_name: "OpenBao"
+    plane: foundation
+    project_url: https://openbao.org
+    install_method: helm
+    chart_repo: https://openbao.github.io/openbao-helm
+    chart_name: openbao
+    chart_version: "0.28.4"
+    app_version: "v2.5.5"
+    namespace: openbao
+    module: 1
+    notes: >
+      Linux Foundation, MPL-2.0 fork of HashiCorp Vault (Vault relicensed to BUSL in
+      2023, no longer OSS). In-cluster secret backend that ESO pulls from over the
+      Vault-compatible API. Dev mode for the workshop: one unsealed in-memory pod, fixed
+      root token, KV v2 at secret/, agent injector off. Not production. The
+      ClusterSecretStore (vault provider) and a seed Job live in openbao-config.
+
+  - name: external-secrets
+    display_name: "External Secrets Operator"
+    plane: foundation
+    project_url: https://external-secrets.io
+    install_method: helm
+    chart_repo: https://charts.external-secrets.io
+    chart_name: external-secrets
+    chart_version: "2.6.0"
+    app_version: "v2.6.0"
+    namespace: external-secrets
+    module: 1
+    notes: >
+      CNCF Sandbox. Use external-secrets.io/v1; v1beta1 is retired. Migrate manifests
+      to v1 or Argo CD will show drift from auto-converted objects.
+
+  - name: cert-manager
+    display_name: "cert-manager"
+    plane: foundation
+    project_url: https://cert-manager.io
+    install_method: helm-oci
+    chart_repo: oci://quay.io/jetstack/charts/cert-manager
+    chart_name: cert-manager
+    chart_version: "v1.20.2"
+    app_version: "v1.20.2"
+    namespace: cert-manager
+    module: 1
+    notes: CNCF Graduated. v1.20 dropped K8s < 1.31.
+
+  - name: kyverno
+    display_name: "Kyverno"
+    plane: foundation
+    project_url: https://kyverno.io
+    install_method: helm
+    chart_repo: https://kyverno.github.io/kyverno
+    chart_name: kyverno
+    chart_version: "3.8.1"
+    app_version: "v1.18.1"
+    namespace: kyverno
+    module: 1
+    notes: >
+      CNCF Graduated. CEL-based policy types (ValidatingPolicy, etc.) are GA as of 1.17.
+      Legacy JMESPath ClusterPolicy deprecated, removal planned v1.20. Also used in the
+      wrap module for AI-plane policies.
+
+  - name: keda
+    display_name: "KEDA"
+    plane: foundation
+    project_url: https://keda.sh
+    install_method: helm
+    chart_repo: https://kedacore.github.io/charts
+    chart_name: keda
+    chart_version: "2.20.1"
+    app_version: "2.20.1"
+    namespace: keda
+    module: 1
+    notes: CNCF Graduated.
+
+  - name: score
+    display_name: "Score (CLI)"
+    plane: foundation
+    project_url: https://score.dev
+    install_method: cli
+    chart_repo: null
+    chart_name: null
+    chart_version: null
+    app_version: "score-k8s 0.14.0"
+    namespace: null
+    module: 3
+    notes: >
+      CNCF Sandbox. Workload spec score.dev/v1b1, not a deployed service. CLI tooling
+      (score-k8s 0.14.0, score-compose 0.41.0) used in self-service templates.
+
+  # --- Foundation: EKS-native ingress, load balancing, storage ---
+  - name: aws-load-balancer-controller
+    display_name: "AWS Load Balancer Controller"
+    plane: foundation
+    project_url: https://kubernetes-sigs.github.io/aws-load-balancer-controller
+    install_method: helm
+    chart_repo: https://aws.github.io/eks-charts
+    chart_name: aws-load-balancer-controller
+    chart_version: "3.4.0"
+    app_version: "v3.4.0"
+    namespace: kube-system
+    module: 1
+    notes: >
+      EKS-native ingress and LB path. Replaces ingress-nginx (end of life) and MetalLB
+      (decorative on EKS). ALB for Ingress, NLB for Service type=LoadBalancer, supports
+      Gateway API. Authenticate via EKS Pod Identity. Confirm Pod Identity support on
+      the 3.x line before the freeze.
+
+  - name: aws-ebs-csi-driver
+    display_name: "AWS EBS CSI driver"
+    plane: foundation
+    project_url: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
+    install_method: helm
+    chart_repo: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
+    chart_name: aws-ebs-csi-driver
+    chart_version: "2.62.0"
+    app_version: "v1.62.0"
+    namespace: kube-system
+    module: 1
+    notes: PersistentVolumes for Prometheus, Loki, Tempo, Grafana. Also available as an EKS managed add-on.
+
+  # --- Foundation: observability ---
+  - name: kube-prometheus-stack
+    display_name: "kube-prometheus-stack"
+    plane: foundation
+    project_url: https://github.com/prometheus-community/helm-charts
+    install_method: helm
+    chart_repo: https://prometheus-community.github.io/helm-charts
+    chart_name: kube-prometheus-stack
+    chart_version: "86.3.2"
+    app_version: "operator v0.91.0"
+    namespace: observability
+    module: 1
+    notes: >
+      Umbrella chart, one Helm release delivering the capabilities in bundled below.
+      Needs K8s >= 1.25.
+    bundled:
+      - name: prometheus
+        version: "v3.12.0"
+      - name: grafana
+        version: "13.0.2"   # grafana subchart 12.4.5
+      - name: alertmanager
+        version: "v0.33.0"
+      - name: kube-state-metrics
+        version: "7.5.1"
+      - name: prometheus-node-exporter
+        version: "4.55.0"
+
+  - name: loki
+    display_name: "Loki"
+    plane: foundation
+    project_url: https://grafana.com/oss/loki
+    install_method: helm
+    chart_repo: https://grafana-community.github.io/helm-charts
+    chart_name: loki
+    chart_version: "17.4.7"
+    app_version: "3.7.2"
+    namespace: observability
+    module: 1
+    notes: >
+      Use the grafana-community repo; the old grafana repo OSS charts are frozen.
+      Use monolithic mode for the demo; Simple Scalable is deprecated. Powers the
+      per-agent attribution query.
+
+  - name: tempo
+    display_name: "Tempo"
+    plane: foundation
+    project_url: https://grafana.com/oss/tempo
+    install_method: helm
+    chart_repo: https://grafana-community.github.io/helm-charts
+    chart_name: tempo
+    chart_version: "1.25.0"
+    app_version: "2.9.0"
+    namespace: observability
+    module: 1
+    notes: >
+      Single-binary tempo chart, lighter than tempo-distributed for a per-student
+      demo cluster (tempo-distributed 2.25.4 is the production alternative).
+      Default Tempo port is 3200, not 3100. Lands the AI-plane traces.
+      Pinned to app 2.9.0 (chart 1.25.0), NOT 2.10.x. Verified empirically on
+      2026-07-23: on 2.10 a trace written then queried came back empty in
+      standalone mode and test_trace_reaches_tempo failed; the downgrade makes it
+      pass. That observation is the reason for the pin and it still stands.
+
+      grafana/tempo#6436 was cited as the likely upstream cause. KEEP THE PIN
+      ANYWAY: rechecked 2026-09-05, the issue is closed, but it was closed by the
+      reporter resolving their own configuration (they added Kafka and
+      partition_ring_live_store), not by a Tempo fix. So its closure says nothing
+      about whether 2.10 behaves here, and the original note's condition, "until
+      #6436 is closed and the fix version confirmed", is only half satisfied.
+      There is no fix version to confirm.
+
+      Lifting this pin therefore needs the empirical test rerun on a current 2.10
+      release, not an issue-tracker check. Anyone bumping it mechanically because
+      the linked issue went green will reintroduce a failure the repo already
+      paid to find.
+
+  - name: opentelemetry-collector
+    display_name: "OTel Collector"
+    plane: foundation
+    project_url: https://opentelemetry.io
+    install_method: helm
+    chart_repo: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart_name: opentelemetry-collector
+    chart_version: "0.158.2"
+    app_version: "0.153.0"
+    namespace: observability
+    module: 1
+    notes: CNCF Graduated (May 2026).
+
+  - name: opentelemetry-operator
+    display_name: "OTel Operator"
+    plane: foundation
+    project_url: https://opentelemetry.io
+    install_method: helm
+    chart_repo: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart_name: opentelemetry-operator
+    chart_version: "0.115.0"
+    app_version: "0.153.0"
+    namespace: observability
+    module: 1
+    notes: Manages Collector and Instrumentation CRs.
+
+  # --- Foundation: Gateway API prerequisite ---
+  - name: gateway-api
+    display_name: "Gateway API"
+    plane: foundation
+    project_url: https://gateway-api.sigs.k8s.io
+    install_method: kubectl
+    chart_repo: null
+    chart_name: null
+    chart_version: null
+    app_version: "v1.5.1"
+    namespace: null
+    module: 2
+    notes: >
+      Upstream CRDs applied via kubectl (no Helm chart for the CRDs). Prerequisite for
+      kgateway and agentgateway. gateway.networking.k8s.io/v1 is GA.
+
+  # --- AI plane ---
+  - name: kgateway
+    display_name: "kgateway"
+    plane: ai
+    project_url: https://kgateway.dev
+    install_method: helm-oci
+    chart_repo: oci://cr.kgateway.dev/kgateway-dev/charts
+    chart_name: kgateway
+    chart_version: "v2.3.4"
+    app_version: "v2.3.4"
+    namespace: kgateway-system
+    module: 2
+    notes: >
+      CNCF Sandbox since March 2025. Install kgateway-crds first. CRDs under
+      gateway.kgateway.dev/v1alpha1. Can also serve as the platform Gateway API ingress.
+
+  - name: agentgateway
+    display_name: "agentgateway"
+    plane: ai
+    project_url: https://agentgateway.dev
+    install_method: helm-oci
+    chart_repo: oci://cr.agentgateway.dev/charts
+    chart_name: agentgateway
+    chart_version: "v1.3.0"
+    app_version: "v1.3.0"
+    namespace: agentgateway
+    module: 2
+    notes: >
+      Linux Foundation (Agentic AI Foundation), NOT CNCF. Apache-2.0. Sibling of
+      kgateway, not its data plane. Mediates LLM, MCP, and A2A traffic. The v1.3.0 chart
+      has no mtls or audit value keys (verified 2026-07-25 via helm show values); mTLS
+      and audit are gateway/route runtime config, not install-time Helm values. Confirm
+      exact CRD Kind names against live docs before the freeze.
+
+  - name: kagent
+    display_name: "kagent"
+    plane: ai
+    project_url: https://kagent.dev
+    install_method: helm-oci
+    chart_repo: oci://ghcr.io/kagent-dev/kagent/helm
+    chart_name: kagent
+    chart_version: "0.9.9"
+    app_version: "v0.9.9"
+    namespace: kagent
+    module: 2
+    notes: >
+      CNCF Sandbox. Install kagent-crds first. Agent CRD is kagent.dev/v1alpha2, field
+      systemMessage, nested under spec.type and spec.declarative. Runs on Google ADK.
+      Demo agent ModelConfig points at in-cluster vLLM through agentgateway, so the guardrail and audit policies apply to it.
+
+  - name: llm-guard
+    display_name: "LLM Guard"
+    plane: ai
+    project_url: https://github.com/protectai/llm-guard
+    install_method: library
+    chart_repo: null
+    chart_name: null
+    chart_version: null
+    app_version: "0.3.16"
+    namespace: kagent
+    module: 2
+    notes: >
+      MIT. Protect AI (now Palo Alto Networks). Python library, optional API image
+      laiyer/llm-guard-api, no Helm chart. ARCHIVED UPSTREAM, not merely dormant:
+      GitHub reports archived=true with the last push 2026-07-08, and PyPI 0.3.16
+      dates from 2025-05-19 with 38 issues left open. Rechecked 2026-09-05.
+
+      An archived repository is read-only, so no CVE in this dependency will ever
+      be fixed upstream. That matters more here than for a typical pin, because
+      this is the prompt-injection scanner: the component whose job is to be
+      attacked. Treat a disclosed vulnerability in it as unpatchable and plan the
+      swap now rather than at disclosure. Pin and vendor the
+      known-good config, treat as a fixed dependency. Powers the injection block.
+
+  - name: openllmetry
+    display_name: "OpenLLMetry"
+    plane: ai
+    project_url: https://github.com/traceloop/openllmetry
+    install_method: library
+    chart_repo: null
+    chart_name: null
+    chart_version: null
+    app_version: "traceloop-sdk 0.61.0"
+    namespace: null
+    module: 2
+    notes: >
+      Apache-2.0 (not MIT). Traceloop. Python SDK added to app code. Emits OTel GenAI
+      semantic conventions (Development grade) to the OTel collector.
+
+  - name: kserve
+    display_name: "KServe"
+    plane: ai
+    project_url: https://kserve.github.io/website
+    install_method: helm-oci
+    chart_repo: oci://ghcr.io/kserve/charts
+    chart_name: kserve-resources
+    chart_version: "v0.19.0"
+    app_version: "v0.19.0"
+    namespace: kserve
+    module: 2
+    notes: >
+      CNCF Incubating. Install kserve-crd first. InferenceService is
+      serving.kserve.io/v1beta1. vLLM backs the Hugging Face runtime and the
+      LLMInferenceService (v1alpha1) path.
+
+  - name: vllm
+    display_name: "vLLM"
+    plane: ai
+    project_url: https://docs.vllm.ai
+    install_method: kubectl
+    chart_repo: null
+    chart_name: null
+    chart_version: null
+    app_version: "v0.23.0"
+    namespace: kserve
+    module: 2
+    notes: >
+      PyTorch Foundation (Linux Foundation). Apache-2.0. CPU image
+      vllm/vllm-openai-cpu:v0.23.0-x86_64. Serves Qwen3-1.7B (backup Qwen3-0.6B) on the
+      single t3.2xlarge node. Flags --device cpu --dtype bfloat16, VLLM_CPU_KVCACHE_SPACE 4
+      (resolved for single-node fit; was 8-16), SYS_NICE capability. Set --served-model-name
+      qwen3-1.7b. Served via KServe.
+
+  - name: llm-d
+    display_name: "llm-d"
+    plane: ai
+    project_url: https://llm-d.ai
+    install_method: kustomize
+    chart_repo: null
+    chart_name: null
+    chart_version: null
+    app_version: "v0.7.0"
+    namespace: llm-d
+    module: 2
+    notes: >
+      CNCF Sandbox since March 2026. Kustomize install. Backed by Red Hat, Google, IBM,
+      CoreWeave, NVIDIA. Pre-1.0, not production-ready. Shown as the distributed-inference
+      scheduling layer, included as an architecture reference rather than a running install.
+
+  - name: mcp-server
+    display_name: "MCP demo server"
+    plane: ai
+    project_url: https://modelcontextprotocol.io
+    install_method: kubectl
+    chart_repo: null
+    chart_name: null
+    chart_version: null
+    app_version: "everything-2025-11-25"
+    namespace: kagent
+    module: 2
+    notes: >
+      The canonical MCP "everything" reference server, run as a KMCP MCPServer
+      (kagent.dev/v1alpha1). KMCP (the MCP controller) and kagent-tools ship inside the
+      kagent chart, so there is no separate install. Gives the demo agent an MCP target to
+      reach through agentgateway (phase 5). Prebuilt mirrored image, no npx at runtime.
+
+  # --- Self-service ---
+  - name: gitea
+    display_name: "Gitea"
+    plane: self-service
+    project_url: https://gitea.com
+    install_method: helm
+    chart_repo: https://dl.gitea.com/charts/
+    chart_name: gitea
+    chart_version: "12.6.0"
+    app_version: "1.26.1"
+    namespace: gitea
+    module: 1
+    notes: >
+      In-cluster Git host the golden path publishes to and the ApplicationSet reads. Lean
+      dev config: SQLite, single replica, HA Postgres and Valkey deps off. Built in Module
+      1 so it is ready for the Module 3 self-service flow. A seed Job creates the org and
+      an API token (gitea-scm-token in argocd) for the ApplicationSet and Backstage.
+
+  - name: self-service-templates
+    display_name: "Self-service templates"
+    plane: self-service
+    project_url: https://backstage.io/docs/features/software-templates
+    install_method: kubectl
+    chart_repo: null
+    chart_name: null
+    chart_version: null
+    app_version: "built-live-module-3"
+    namespace: backstage
+    module: 3
+    notes: >
+      Backstage scaffolder templates and ArgoCD ApplicationSets written live in Module 3.
+      The agent-service template generates a repo with a kagent Agent CRD, agentgateway
+      route, LLM Guard policy reference, and OTel defaults. Not a pinned external artifact.
