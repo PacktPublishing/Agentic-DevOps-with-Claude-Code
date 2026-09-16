@@ -1,0 +1,69 @@
+# ABOUTME: In-cluster Gitea, the Git host the self-service golden path publishes to and
+# ABOUTME: the ArgoCD ApplicationSet reads. Lean: SQLite, single replica, no HA deps.
+#
+# The chart defaults to HA Postgres and Valkey; both are turned off. SQLite plus one
+# replica is right for an ephemeral workshop, never for production. The admin password is
+# inline because this is a throwaway dev instance (same posture as the OpenBao dev token).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitea
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://dl.gitea.com/charts/
+    chart: gitea
+    targetRevision: 12.6.0
+    helm:
+      valuesObject:
+        replicaCount: 1
+        # SQLite requires a single replica; no rolling surge.
+        strategy:
+          type: Recreate
+        postgresql-ha:
+          enabled: false
+        postgresql:
+          enabled: false
+        valkey-cluster:
+          enabled: false
+        valkey:
+          enabled: false
+        persistence:
+          enabled: true
+          size: 5Gi
+        gitea:
+          # admin MUST be nested here. At the top level the chart ignores it and keeps its own default
+          # password, which then 401s every authenticated API call (found live on the seed job).
+          admin:
+            username: gitea_admin
+            # Dev workshop only, ephemeral. Not a real credential.
+            password: "Workshop-Dev-Only1!"
+            email: "admin@platform.local"
+          config:
+            database:
+              DB_TYPE: sqlite3
+            server:
+              ROOT_URL: http://gitea-http.gitea.svc:3000/
+            service:
+              DISABLE_REGISTRATION: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitea
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

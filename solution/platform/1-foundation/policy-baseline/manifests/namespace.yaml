@@ -1,0 +1,15 @@
+# ABOUTME: The tenant workload namespace that golden-path services land in.
+# ABOUTME: Carries the opt-in label that scopes the Kyverno baseline to it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-apps
+  labels:
+    # Opt-in marker. The baseline ClusterPolicies match only namespaces that
+    # carry this label, so platform namespaces are never blocked by tenant rules.
+    agentic-platform.io/policy: enforce
+    # Pod Security Admission baseline, enforced by the API server alongside Kyverno.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: agentic-platform

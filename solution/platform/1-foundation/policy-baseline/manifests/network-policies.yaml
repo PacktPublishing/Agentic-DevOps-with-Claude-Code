@@ -1,0 +1,62 @@
+# ABOUTME: Default-deny baseline plus the minimum egress a tenant pod needs.
+# ABOUTME: Applies to the demo-apps namespace; deny first, then add back DNS.
+---
+# Deny all ingress and egress in demo-apps. Nothing moves until a later policy
+# explicitly allows it. This is the default-deny posture every tenant inherits.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: demo-apps
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Allow DNS egress to kube-dns so pods can resolve names. Without this, a pod in
+# a default-deny namespace cannot resolve anything and every connection fails.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: demo-apps
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Allow pods in demo-apps to reach each other. Cross-namespace traffic stays
+# denied until a route through agentgateway is opened explicitly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: demo-apps
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}

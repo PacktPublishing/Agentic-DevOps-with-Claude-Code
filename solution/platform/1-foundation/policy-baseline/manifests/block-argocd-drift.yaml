@@ -1,0 +1,103 @@
+# ABOUTME: Rejects out-of-band mutation of ArgoCD-managed resources, so "all cluster changes flow
+# ABOUTME: through Git" is enforced at admission rather than being a convention people remember.
+#
+# This is the first GitOps rule in this repo's own guidance, and until now nothing checked it. A
+# rule that lives only in a document is a rule that holds until someone is in a hurry.
+#
+# Four things here were found the hard way on live clusters. Each is load-bearing, and each is the
+# kind of mistake that makes the policy look like it works while doing nothing:
+#
+# 1. MATCH ON THE ANNOTATION, NOT A LABEL. ArgoCD here uses annotation tracking
+#    (argocd.argoproj.io/tracking-id), not label tracking. An earlier version selected on
+#    app.kubernetes.io/instance, which managed resources never carry, so the policy was INERT and an
+#    agent could drift anything freely. Caught 2026-06-27 by a server dry-run patch that was
+#    admitted when it should have been refused.
+#
+# 2. ARGOCD'S OWN COMPONENTS ARE NOT DRIFT. argocd-server, repo-server and friends are installed by
+#    the bootstrap rather than synced by an Application, so they carry no tracking-id and must stay
+#    configurable. The precondition handles this by gating on the annotation.
+#
+# 3. THE KAGENT CONTROLLER MUST BE EXCLUDED. Deployments it generates from Agent CRs inherit the
+#    Agent's tracking-id, so without the exclude the controller's own reconcile reads as drift. In
+#    the sibling repo that froze agent OTel configuration: tracing and logging changes could never
+#    propagate, with no error that pointed at a policy.
+#
+# 4. SYSTEM PRINCIPALS MUST BE EXCLUDED. Denying every non-ArgoCD principal on UPDATE and DELETE
+#    also blocks the built-in controllers and kubelet from maintaining the object, which breaks it.
+#
+# SHIPS AS AUDIT, unlike the sibling's Enforce. This repo installs first and enforces last: an
+# admission rule that rejects the platform's own reconcile loops before the platform is healthy
+# stalls the build and presents as a broken component. The governance beat flips it deliberately.
+#
+# background: false and skipBackgroundRequests are required, not stylistic. userInfo-based excludes
+# are unavailable to background scans, so a background evaluation would see no principal and match
+# everything.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: block-argocd-drift
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+  annotations:
+    policies.kyverno.io/title: Block ArgoCD drift
+    policies.kyverno.io/category: GitOps
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Resources reconciled by ArgoCD may only be changed through Git. Direct mutation by any other
+      principal is a drift event, reported in Audit and rejected once enforcement is turned on.
+spec:
+  background: false
+  rules:
+    - name: deny-drift-on-argocd-managed
+      skipBackgroundRequests: true
+      match:
+        any:
+          - resources:
+              kinds:
+                - Deployment
+                - ConfigMap
+                - Service
+              operations:
+                - UPDATE
+                - DELETE
+      preconditions:
+        # Scope to what ArgoCD actually manages. Every synced object carries this annotation;
+        # bootstrap-installed components do not.
+        all:
+          - key: '{{ request.object.metadata.annotations."argocd.argoproj.io/tracking-id" || request.oldObject.metadata.annotations."argocd.argoproj.io/tracking-id" || ''NOT_MANAGED'' }}'
+            operator: NotEquals
+            value: NOT_MANAGED
+      exclude:
+        any:
+          - subjects:
+              # ArgoCD owns these resources and must be able to reconcile them.
+              - kind: ServiceAccount
+                namespace: argocd
+                name: argocd-application-controller
+              # kagent reconciles the Deployments it generates from Agent CRs, which inherit the
+              # Agent's tracking-id. See note 3 above.
+              - kind: ServiceAccount
+                namespace: kagent
+                name: kagent-controller
+              # Built-in controllers and kubelet keep the managed object healthy.
+              - kind: Group
+                name: system:serviceaccounts:kube-system
+              - kind: Group
+                name: system:nodes
+              # A human with cluster-admin can always intervene.
+              - kind: Group
+                name: system:masters
+      validate:
+        # Pre-existing violations are reported, not retroactively blocked, so turning enforcement on
+        # cannot brick a cluster that already drifted.
+        allowExistingViolations: true
+        failureAction: Audit
+        message: >-
+          This resource is managed by ArgoCD. Change it in Git, not in the cluster.
+          Direct mutation by a non-ArgoCD principal is drift.
+        deny:
+          conditions:
+            any:
+              - key: "true"
+                operator: Equals
+                value: "true"

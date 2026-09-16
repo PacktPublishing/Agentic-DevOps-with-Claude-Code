@@ -1,0 +1,174 @@
+# ABOUTME: Seeds Gitea for self-service: creates the agents org and an API token, then
+# ABOUTME: writes that token as gitea-scm-token in argocd for the ApplicationSet.
+#
+# Integration glue against the live Gitea API. The exact API responses should be
+# smoke-tested on a real cluster before the freeze. Admin creds match the chart's dev
+# admin (ephemeral workshop, not a real credential).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gitea-seed
+  namespace: gitea
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  backoffLimit: 30
+  template:
+    metadata:
+      labels:
+        app: gitea-seed
+        version: "1.26.1"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: gitea-seed
+      securityContext:
+        runAsNonRoot: true
+        # The curl image declares its user non-numerically (curl_user), so runAsNonRoot alone
+        # leaves kubelet unable to verify non-root and the pod fails CreateContainerConfigError.
+        # Pin the numeric uid/gid the image ships with (verified: uid 100 curl_user, gid 101).
+        runAsUser: 100
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: seed
+          image: ghcr.io/peopleforrester/curl:8.11.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GITEA
+              value: "http://gitea-http.gitea.svc:3000"
+            # Read from the same Secret apply.sh derives from gitea/values.yaml, never a second
+            # hardcoded copy. This job had ADMIN_PASS: workshop-dev-only while the real password
+            # was Workshop-Dev-Only1!, so every API call 401'd: the exact drift the platform seed
+            # job's comment warns about. secretKeyRef makes the two physically incapable of
+            # disagreeing.
+            - name: ADMIN_USER
+              valueFrom: { secretKeyRef: { name: gitea-seed-creds, key: username } }
+            - name: ADMIN_PASS
+              valueFrom: { secretKeyRef: { name: gitea-seed-creds, key: password } }
+            - name: ORG
+              value: "agents"
+            - name: TOKEN_NAME
+              value: "scm-automation"
+            - name: ARGOCD_SERVER
+              value: "https://argo-cd-argocd-server.argocd.svc"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              auth="-u ${ADMIN_USER}:${ADMIN_PASS}"
+
+              echo "waiting for Gitea API..."
+              until curl -fsS "${GITEA}/api/v1/version" >/dev/null 2>&1; do sleep 3; done
+
+              echo "ensuring org ${ORG} exists"
+              curl -sS ${auth} -X POST "${GITEA}/api/v1/orgs" \
+                -H 'Content-Type: application/json' \
+                -d "{\"username\":\"${ORG}\"}" -o /dev/null -w '%{http_code}\n' || true
+
+              echo "rotating token ${TOKEN_NAME}"
+              curl -sS ${auth} -X DELETE \
+                "${GITEA}/api/v1/users/${ADMIN_USER}/tokens/${TOKEN_NAME}" \
+                -o /dev/null -w '%{http_code}\n' || true
+              resp="$(curl -fsS ${auth} -X POST \
+                "${GITEA}/api/v1/users/${ADMIN_USER}/tokens" \
+                -H 'Content-Type: application/json' \
+                -d "{\"name\":\"${TOKEN_NAME}\",\"scopes\":[\"write:organization\",\"write:repository\",\"read:repository\",\"read:user\",\"read:issue\"]}")"
+              sha1="$(printf '%s' "${resp}" | grep -o '"sha1":"[^"]*"' | sed 's/.*"sha1":"//;s/"//')"
+              [ -n "${sha1}" ] || { echo "ERROR: no token returned" >&2; exit 1; }
+
+              echo "writing gitea-scm-token into argocd"
+              api="https://kubernetes.default.svc"
+              ka="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+              ca="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+              curl -sS --cacert "${ca}" -H "Authorization: Bearer ${ka}" -X DELETE \
+                "${api}/api/v1/namespaces/argocd/secrets/gitea-scm-token" \
+                -o /dev/null -w '%{http_code}\n' || true
+              curl -fsS --cacert "${ca}" -H "Authorization: Bearer ${ka}" \
+                -H 'Content-Type: application/json' -X POST \
+                "${api}/api/v1/namespaces/argocd/secrets" \
+                -d "{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"gitea-scm-token\"},\"stringData\":{\"token\":\"${sha1}\"}}" \
+                -o /dev/null -w '%{http_code}\n'
+
+              # Assemble the backstage-integrations Secret Backstage reads: the Gitea creds
+              # (username + the admin password, used as the integration password) and a fresh
+              # ArgoCD API token for the argo-cd plugin.
+              #
+              # THIS MUST BE AN ACCOUNT TOKEN, NOT A SESSION TOKEN. POST /api/v1/session returns a
+              # JWT that expires (24h by default), and nothing here re-mints it, so Backstage's
+              # ArgoCD tab starts answering
+              #   invalid session: token has invalid claims: token is expired
+              # roughly a day after the cluster is built. A four-hour workshop never reaches that
+              # point; a reader working through the book over a weekend sees nothing else. Found on
+              # a 36-hour-old cluster.
+              #
+              # POST /api/v1/account/<name>/token with no expiresIn returns a token carrying no
+              # `exp` claim at all. Verified by decoding one:
+              #   {"iss":"argocd","sub":"backstage:apiKey","nbf":...,"iat":...,"jti":...}
+              #
+              # The admin session below is still needed, but only to authorise the mint. What
+              # Backstage ends up holding is the `backstage` account's read-only token, not an
+              # admin session, which is also the smaller grant: see accounts.backstage and the
+              # policy.csv in 0-bootstrap/argocd-values.yaml.
+              echo "minting an ArgoCD token for Backstage"
+              until curl -fsSk "${ARGOCD_SERVER}/api/version" >/dev/null 2>&1; do echo "waiting for ArgoCD API..."; sleep 5; done
+              # The k8s API returns pretty-printed JSON, so compact the whitespace before the
+              # regex (a "password": "x" with a space matched nothing otherwise). data comes
+              # before metadata in the object, so the first match is .data.password.
+              apw="$(curl -fsS --cacert "${ca}" -H "Authorization: Bearer ${ka}" \
+                "${api}/api/v1/namespaces/argocd/secrets/argocd-initial-admin-secret" \
+                | tr -d '\n\r\t ' | grep -o '"password":"[^"]*"' | head -1 \
+                | sed 's/"password":"//;s/"$//' | base64 -d)"
+              asession="$(curl -sSk -X POST "${ARGOCD_SERVER}/api/v1/session" \
+                -H 'Content-Type: application/json' \
+                -d "{\"username\":\"admin\",\"password\":\"${apw}\"}" \
+                | tr -d '\n\r\t ' | grep -o '"token":"[^"]*"' | head -1 \
+                | sed 's/"token":"//;s/"$//')"
+              [ -n "${asession}" ] || { echo "ERROR: ArgoCD admin login failed" >&2; exit 1; }
+
+              # The non-expiring account token. An empty body means no expiresIn, which is what
+              # leaves the `exp` claim off.
+              atoken="$(curl -sSk -X POST "${ARGOCD_SERVER}/api/v1/account/backstage/token" \
+                -H "Authorization: Bearer ${asession}" \
+                -H 'Content-Type: application/json' -d '{}' \
+                | tr -d '\n\r\t ' | grep -o '"token":"[^"]*"' | head -1 \
+                | sed 's/"token":"//;s/"$//')"
+              [ -n "${atoken}" ] || {
+                echo "ERROR: could not mint a backstage account token." >&2
+                echo "  accounts.backstage: apiKey must be set in argocd-cm, and argocd-server" >&2
+                echo "  must have restarted since. See 0-bootstrap/argocd-values.yaml." >&2
+                exit 1
+              }
+
+              # Refuse to ship a token that will expire. Silently writing one puts the portal on a
+              # 24-hour timer that nothing reports, which is the failure this whole block exists to
+              # prevent.
+              claims="$(echo "${atoken}" | cut -d. -f2)"
+              case $(( ${#claims} % 4 )) in 2) claims="${claims}==" ;; 3) claims="${claims}=" ;; esac
+              if echo "${claims}" | base64 -d 2>/dev/null | grep -q '"exp"'; then
+                echo "ERROR: the ArgoCD token carries an exp claim and will expire." >&2
+                exit 1
+              fi
+
+              echo "writing backstage-integrations into backstage"
+              curl -sS --cacert "${ca}" -H "Authorization: Bearer ${ka}" -X DELETE \
+                "${api}/api/v1/namespaces/backstage/secrets/backstage-integrations" \
+                -o /dev/null -w '%{http_code}\n' || true
+              curl -fsS --cacert "${ca}" -H "Authorization: Bearer ${ka}" \
+                -H 'Content-Type: application/json' -X POST \
+                "${api}/api/v1/namespaces/backstage/secrets" \
+                -d "{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"backstage-integrations\"},\"stringData\":{\"GITEA_USERNAME\":\"${ADMIN_USER}\",\"GITEA_TOKEN\":\"${ADMIN_PASS}\",\"ARGOCD_AUTH_TOKEN\":\"argocd.token=${atoken}\"}}" \
+                -o /dev/null -w '%{http_code}\n'
+              echo "seed complete"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

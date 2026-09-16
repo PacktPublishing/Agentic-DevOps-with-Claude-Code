@@ -1,0 +1,38 @@
+# ABOUTME: ESO ClusterSecretStore pointing at in-cluster OpenBao, plus the dev token.
+# ABOUTME: OpenBao speaks the Vault API, so ESO's vault provider drives it unchanged.
+#
+# Dev mode only. The token below is OpenBao's fixed dev root token (matches the server's
+# devRootToken), not a real credential, so it can live in Git for the workshop. In
+# production you would enable OpenBao Kubernetes auth and drop the static token. Confirm
+# the ESO vault provider fields against the pinned ESO version before the freeze.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openbao-root-token
+  namespace: openbao
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+type: Opaque
+stringData:
+  # Ephemeral dev root token, mirrors the OpenBao server devRootToken. Not sensitive.
+  token: "root"
+---
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: openbao
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  provider:
+    vault:
+      server: "http://openbao.openbao.svc:8200"
+      # KV v2 is mounted at secret/ by the OpenBao dev server.
+      path: "secret"
+      version: "v2"
+      auth:
+        tokenSecretRef:
+          name: openbao-root-token
+          key: token
+          namespace: openbao

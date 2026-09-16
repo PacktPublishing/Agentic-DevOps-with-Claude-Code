@@ -1,0 +1,26 @@
+# ABOUTME: Demonstrates the ESO pull: reads secret/demo from OpenBao and projects it
+# ABOUTME: into a Kubernetes Secret. This is the pattern to reuse for your own apps.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: demo-app-credentials
+  namespace: openbao
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: openbao
+    kind: ClusterSecretStore
+  target:
+    name: demo-app-credentials
+    creationPolicy: Owner
+  data:
+    - secretKey: username
+      remoteRef:
+        key: demo
+        property: username
+    - secretKey: password
+      remoteRef:
+        key: demo
+        property: password

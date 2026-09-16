@@ -1,0 +1,48 @@
+# ABOUTME: Kyverno policy requiring every Agent to declare a guardrail and OTel instrumentation,
+# ABOUTME: so an ungoverned agent is refused at admission rather than found later in a dashboard.
+#
+# This is the Phase 8 promotion: the same controls the AI policy set audits are enforced here for
+# Agents specifically. The distinction that makes it teachable is that Audit tells you an agent is
+# ungoverned after it is running, and Enforce means the ungoverned agent never exists.
+#
+# failureAction is Audit in the committed state ON PURPOSE. Install first, enforce last: an
+# admission guardrail that rejects the platform's own workloads before those workloads are
+# installed stalls the build, and the failure looks like a broken component rather than a policy
+# doing its job. The B16/P16 governance beat flips this to Enforce deliberately, on a healthy
+# platform, and that flip is the demonstration.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-agent-controls
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+  annotations:
+    policies.kyverno.io/title: Require agent controls
+    policies.kyverno.io/category: AI Governance
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Every kagent Agent must name a guardrail policy and request OpenTelemetry instrumentation.
+      An agent without both is unobservable and unguarded, which is the combination this platform
+      exists to prevent.
+spec:
+  background: true
+  rules:
+    - name: agent-must-declare-guardrail-and-otel
+      match:
+        any:
+          - resources:
+              kinds:
+                - kagent.dev/v1alpha2/Agent
+      validate:
+        # Rule-level failureAction, which is where it lives from Kyverno 1.13 onward. The
+        # top-level spec.validationFailureAction is deprecated.
+        failureAction: Audit
+        message: >-
+          An Agent must carry the annotations agentic-platform.io/llm-guard-policy and
+          instrumentation.opentelemetry.io/inject-python. Without the first it is unguarded;
+          without the second its calls produce no spans and cannot be attributed.
+        pattern:
+          metadata:
+            annotations:
+              agentic-platform.io/llm-guard-policy: "?*"
+              instrumentation.opentelemetry.io/inject-python: "?*"

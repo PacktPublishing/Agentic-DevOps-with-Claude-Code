@@ -1,0 +1,62 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-load-balancer-controller
+  namespace: argocd
+  annotations:
+    # Wave 0: the ingress and LB path on EKS. Replaces ingress-nginx (EOL) and
+    # MetalLB (decorative on EKS).
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://aws.github.io/eks-charts
+    chart: aws-load-balancer-controller
+    targetRevision: 3.4.0
+    helm:
+      valuesObject:
+        # clusterName, vpcId and region are per-cluster and CANNOT be hardcoded. All three are
+        # placeholders that provision/cluster-facts.sh substitutes into your working copy under
+        # platform/, reading the values from the platform-cluster-facts ConfigMap it writes in
+        # kube-system. This file, the reference under solution/, keeps the placeholders on purpose.
+        #
+        # vpcId is templated rather than left to IMDS on purpose: the controller pod's IMDS fetch
+        # times out under prefix delegation ("failed to fetch VPC ID from instance metadata:
+        # context deadline exceeded") and the pod crash-loops, which leaves this Application
+        # Degraded forever while the provisioning-time helm install quietly carries the cluster.
+        clusterName: REPLACE_WITH_CLUSTER_NAME
+        vpcId: REPLACE_WITH_VPC_ID
+        region: REPLACE_WITH_REGION
+        # Disable the cluster-wide Service mutating webhook. By default the controller
+        # registers mservice.elbv2.k8s.aws with failurePolicy=Fail on ALL Services, so
+        # whenever the controller is unhealthy (no IAM, mid-rollout, scaled to zero)
+        # every Service creation across the cluster is blocked. The workshop routes
+        # through Ingress and Gateway API, not legacy type=LoadBalancer annotations, so
+        # this webhook is not needed. Validation caught it cascading into kyverno-svc.
+        enableServiceMutatorWebhook: false
+        serviceAccount:
+          create: true
+          name: aws-load-balancer-controller
+          # Pod Identity supplies credentials via an association created at
+          # provisioning (one reusable scoped role across the fleet). Do NOT
+          # annotate the SA with a role ARN; that is the IRSA path.
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+# CRDs ship with helm install but not helm upgrade; manage the CRDs as a
+# separate pinned step on upgrades. Provisioning creates the Pod Identity
+# association binding this SA to a role scoped to the LB controller policy.

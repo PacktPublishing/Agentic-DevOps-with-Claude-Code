@@ -1,0 +1,98 @@
+# ABOUTME: Helm values for the bootstrap ArgoCD install. Teaches ArgoCD to assess the custom
+# ABOUTME: resources this platform runs, so the dashboard cannot report green over a dead one.
+#
+# ArgoCD reports an Application Healthy when it cannot assess the resources inside it. That is a
+# reasonable default and a bad one to leave in place here: on 2026-09-17 the platform reported 39
+# of 39 Applications Synced and Healthy while the MCP server's init container had failed 1,584
+# times over six hours and the demo agent could load no tools at all. Nothing was lying; ArgoCD
+# had no health check for an MCPServer, so it assumed the best.
+#
+# A dashboard that cannot go red is not a dashboard. Every custom resource whose readiness the
+# platform depends on gets a check here.
+#
+# KServe's InferenceService: the model is reached in-cluster at qwen3-predictor.kserve.svc and
+# KServe creates no ingress here (see the kserve Application's disableIngressCreation, which turns
+# off an ingress reconciler that assumes Istio and Knative). PredictorReady is therefore the
+# condition that matters, and it is what the workshop depends on.
+configs:
+  cm:
+    # A local ArgoCD account for Backstage's argo-cd plugin, with apiKey capability.
+    #
+    # The seed job used to authenticate Backstage with a SESSION token from POST /api/v1/session.
+    # Those expire (24h by default) and nothing re-mints them, so the portal's ArgoCD tab silently
+    # starts returning `invalid session: token has invalid claims: token is expired` about a day
+    # after the cluster is built. Found on a 36-hour-old cluster; a four-hour workshop never sees
+    # it, and a reader working through the book over a weekend sees nothing else.
+    #
+    # An account token from POST /api/v1/account/backstage/token carries no `exp` claim at all.
+    # Verified by decoding one: {"iss":"argocd","sub":"backstage:apiKey","nbf":...,"iat":...,
+    # "jti":...} and the applications API answers 200 with it.
+    #
+    # It is also the smaller grant. Backstage was holding an admin session to read a list of
+    # Applications; this account can do nothing else, which is what the RBAC below says.
+    accounts.backstage: apiKey
+    resource.customizations.health.serving.kserve.io_InferenceService: |
+      hs = {}
+      if obj.status ~= nil and obj.status.conditions ~= nil then
+        for i, c in ipairs(obj.status.conditions) do
+          if c.type == "PredictorReady" and c.status == "True" then
+            hs.status = "Healthy"
+            hs.message = "Predictor ready and serving"
+            return hs
+          end
+        end
+      end
+      hs.status = "Progressing"
+      hs.message = "Waiting for the predictor to become ready"
+      return hs
+  # MCPServer: Ready went False the entire six hours the everything server was crash-looping,
+  # while the Application it belongs to reported Healthy. This is the check that would have said so.
+  # Progressing rather than Degraded on False, because a cold provision legitimately spends a
+  # minute or two there and a red dashboard during normal startup teaches people to ignore red.
+  # Progressing is enough: it is not Healthy, and nothing that counts green can count it.
+    resource.customizations.health.kagent.dev_MCPServer: |
+      hs = {}
+      if obj.status ~= nil and obj.status.conditions ~= nil then
+        for i, c in ipairs(obj.status.conditions) do
+          if c.type == "Ready" then
+            if c.status == "True" then
+              hs.status = "Healthy"
+              hs.message = c.message
+            else
+              hs.status = "Progressing"
+              hs.message = c.message
+            end
+            return hs
+          end
+        end
+      end
+      hs.status = "Progressing"
+      hs.message = "Waiting for the MCP server to report Ready"
+      return hs
+  # Agent: same reasoning. An Agent whose Deployment never becomes ready is the difference between
+  # a platform that answers and one that does not, and it should not read as Healthy.
+    resource.customizations.health.kagent.dev_Agent: |
+      hs = {}
+      if obj.status ~= nil and obj.status.conditions ~= nil then
+        for i, c in ipairs(obj.status.conditions) do
+          if c.type == "Ready" then
+            if c.status == "True" then
+              hs.status = "Healthy"
+              hs.message = c.message
+            else
+              hs.status = "Progressing"
+              hs.message = c.message
+            end
+            return hs
+          end
+        end
+      end
+      hs.status = "Progressing"
+      hs.message = "Waiting for the agent to report Ready"
+      return hs
+  rbac:
+    # Read-only, and only the two resources the plugin reads. `g,` binds the account to the role.
+    policy.csv: |
+      p, role:backstage-readonly, applications, get, */*, allow
+      p, role:backstage-readonly, projects, get, *, allow
+      g, backstage, role:backstage-readonly

@@ -1,0 +1,51 @@
+# ABOUTME: ArgoCD Application wiring ESO to OpenBao: the ClusterSecretStore, the dev
+# ABOUTME: token, a seed Job, and a demo ExternalSecret. Syncs after both are up (wave 2).
+#
+# Sourced from the in-cluster Gitea that provisioning seeds; ArgoCD reads it anonymously. Until a remote exists, apply
+# manifests/ directly with kubectl after OpenBao and ESO are running.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: openbao-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/platform/packt-agentic-devops.git
+    targetRevision: main
+    path: platform/1-foundation/openbao-config/manifests
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: openbao
+  # External Secrets defaults nested fields onto the ExternalSecret after apply
+  # (data[].remoteRef.{conversionStrategy,decodingStrategy,metadataPolicy,nullBytePolicy}
+  # and target.deletionPolicy), which the manifest does not set, so ArgoCD sees drift and
+  # the app never reaches Synced. The secret itself syncs fine (SecretSynced=True). Ignore
+  # the defaulted fields.
+  ignoreDifferences:
+    - group: external-secrets.io
+      kind: ExternalSecret
+      jqPathExpressions:
+        - .spec.data[].remoteRef.conversionStrategy
+        - .spec.data[].remoteRef.decodingStrategy
+        - .spec.data[].remoteRef.metadataPolicy
+        - .spec.data[].remoteRef.nullBytePolicy
+        - .spec.target.deletionPolicy
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - ServerSideApply=true

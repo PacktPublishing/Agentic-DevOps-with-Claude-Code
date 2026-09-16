@@ -1,0 +1,60 @@
+# ABOUTME: Seeds a demo KV secret into OpenBao so the ESO pull has something to read.
+# ABOUTME: Waits for the server, writes secret/demo, then exits. Dev-mode data is
+# in-memory, so a server restart loses it and this Job would need to re-run.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openbao-seed-demo
+  namespace: openbao
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  backoffLimit: 20
+  template:
+    metadata:
+      labels:
+        app: openbao-seed
+        version: "2.5.5"
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # The bao image declares its user non-numerically (uid 100 "openbao"), so runAsNonRoot
+        # alone leaves kubelet unable to verify non-root and the container fails with
+        # CreateContainerConfigError. Pin the explicit numeric uid/gid the image ships with,
+        # matching what the OpenBao server StatefulSet itself runs as (D18 pattern).
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: seed
+          # Mirrored OpenBao image (the bao CLI). No docker.io references in manifests.
+          image: ghcr.io/peopleforrester/openbao:2.5.5
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "waiting for OpenBao to answer..."
+              until bao status >/dev/null 2>&1; do sleep 3; done
+              bao kv put secret/demo username=workshop password=changeme
+              echo "seeded secret/demo"
+          env:
+            - name: BAO_ADDR
+              value: "http://openbao.openbao.svc:8200"
+            - name: BAO_TOKEN
+              value: "root"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

@@ -1,0 +1,69 @@
+# ABOUTME: Service account and RBAC for the Gitea seed Job. Lets it write the SCM token
+# ABOUTME: Secret into the argocd namespace where the ApplicationSet reads it.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitea-seed
+  namespace: gitea
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+---
+# Scoped to writing the one SCM-token Secret in argocd.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gitea-seed-token-writer
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "update", "get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitea-seed-token-writer
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gitea-seed-token-writer
+subjects:
+  - kind: ServiceAccount
+    name: gitea-seed
+    namespace: gitea
+---
+# The same Job also assembles the backstage-integrations Secret (Gitea creds plus a minted
+# ArgoCD token) that Backstage reads. That Secret lives in the backstage namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gitea-seed-backstage-writer
+  namespace: backstage
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "update", "get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitea-seed-backstage-writer
+  namespace: backstage
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gitea-seed-backstage-writer
+subjects:
+  - kind: ServiceAccount
+    name: gitea-seed
+    namespace: gitea
