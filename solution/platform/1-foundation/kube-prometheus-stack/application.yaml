@@ -1,0 +1,73 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 86.3.2
+    helm:
+      valuesObject:
+        # The EKS control plane is managed and not scrapable; disable these
+        # targets or they sit permanently failed.
+        kubeScheduler:
+          enabled: false
+        kubeControllerManager:
+          enabled: false
+        kubeEtcd:
+          enabled: false
+        # Prometheus TSDB on a gp3 PVC (the gp3 StorageClass and EBS CSI driver
+        # are foundation prerequisites). Do not use emptyDir.
+        prometheus:
+          prometheusSpec:
+            retention: 6h
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 10Gi
+        grafana:
+          enabled: true
+          # The stack provisions Prometheus and Alertmanager as datasources but not Loki or
+          # Tempo, so logs and traces are invisible in Grafana and the phase-2 datasource
+          # check fails. Wire both to their in-cluster Services: the Loki gateway (port 80)
+          # and the Tempo query API (port 3200).
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              uid: loki
+              access: proxy
+              url: http://loki-gateway.observability.svc
+            - name: Tempo
+              type: tempo
+              uid: tempo
+              access: proxy
+              url: http://tempo.observability.svc:3200
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+# CRDs ship in a crds sub-chart installed on first install only. For a CRD-schema
+# bump, apply the operator CRDs server-side before upgrading.

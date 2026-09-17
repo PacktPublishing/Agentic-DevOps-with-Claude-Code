@@ -1,0 +1,63 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tempo
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    # Single-binary tempo chart, lighter than tempo-distributed for a
+    # per-student demo cluster. grafana-community repo.
+    repoURL: https://grafana-community.github.io/helm-charts
+    chart: tempo
+    # Pinned to 1.25.0 (app 2.9.0), NOT the 2.2.x/2.10 line: grafana/tempo#6436
+    # makes flushed blocks unsearchable in standalone mode, so test_trace_reaches_tempo
+    # fails. Verified 2026-07-23 that this chart passes the test.
+    targetRevision: 1.25.0
+    helm:
+      valuesObject:
+        # NO PERSISTENCE, DELIBERATELY, AND THE ASYMMETRY IS WORTH KNOWING ABOUT.
+        #
+        # Prometheus and Loki each take a 10Gi gp3 volume here; Tempo takes none, so its blocks
+        # live in an emptyDir and every trace is lost when the pod restarts. Nothing recorded that,
+        # and it read as an oversight when traces went missing mid-validation.
+        #
+        # It is the right trade for this platform. Traces are the most voluminous of the three
+        # signals and the least useful after the fact in a workshop: what matters is that the span
+        # you just produced shows up, not that last Tuesday's is still there. At fleet scale the
+        # volume is multiplied by every cluster.
+        #
+        # The consequence to know about: a Tempo restart empties the store, so any check that reads
+        # traces has to produce the traces it reads. The agent_traffic fixture in tests/conftest.py
+        # does exactly that, for exactly this reason.
+        #
+        # Set persistence.enabled with a size here if traces ever need to outlive the pod.
+        tempo:
+          # OTLP receivers for the AI-plane traces (default port is now 3200).
+          receivers:
+            otlp:
+              protocols:
+                grpc:
+                  endpoint: 0.0.0.0:4317
+                http:
+                  endpoint: 0.0.0.0:4318
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

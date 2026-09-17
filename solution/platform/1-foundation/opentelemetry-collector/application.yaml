@@ -1,0 +1,71 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opentelemetry-collector
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart: opentelemetry-collector
+    targetRevision: 0.158.2
+    helm:
+      valuesObject:
+        # The chart has no default mode or image repository; both are required.
+        mode: daemonset
+        image:
+          repository: otel/opentelemetry-collector-k8s
+        # In daemonset mode the chart creates the DaemonSet but no Service, so
+        # opentelemetry-collector.observability.svc does not resolve and any in-cluster
+        # sender (the phase-2 trace probe, and student workloads) gets NXDOMAIN. Enabling
+        # the Service adds a ClusterIP that load-balances across the agent pods. The Helm
+        # release name is opentelemetry-collector, so the Service is named exactly
+        # opentelemetry-collector while the DaemonSet keeps the -agent suffix.
+        service:
+          enabled: true
+        presets:
+          kubernetesAttributes:
+            enabled: true
+        config:
+          processors:
+            # memory_limiter must come first in each pipeline.
+            memory_limiter:
+              check_interval: 1s
+              limit_percentage: 80
+            # The eks detector hard-fails at startup ("node name is empty") because it
+            # needs node_from_env_var pointed at the node-name env. The kubernetesAttributes
+            # preset already supplies k8s.* attributes, so ec2 (host/cloud metadata via
+            # IMDS) plus env is enough. Dropping eks avoids the CrashLoopBackOff.
+            resourcedetection:
+              detectors: [env, ec2]
+          exporters:
+            otlp/tempo:
+              endpoint: tempo.observability.svc:4317
+              tls:
+                insecure: true
+          service:
+            pipelines:
+              traces:
+                receivers: [otlp]
+                processors: [memory_limiter, resourcedetection, batch]
+                exporters: [otlp/tempo]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
