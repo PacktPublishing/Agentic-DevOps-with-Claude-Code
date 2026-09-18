@@ -1,0 +1,80 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: backstage
+  namespace: argocd
+  annotations:
+    # Wave 4: last. Backstage is the front door; it sits on top of the
+    # foundation and shows live ArgoCD and Kubernetes state.
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://backstage.github.io/charts
+    chart: backstage
+    targetRevision: 2.8.2
+    helm:
+      valuesObject:
+        backstage:
+          # Pre-built custom image, never built from source live. Mirror to the
+          # workshop GHCR namespace. The chart's built-in image is demo-only and
+          # carries no plugins; the real app must be a custom image.
+          image:
+            # The chart builds the ref as registry/repository, so repository must NOT repeat the
+            # host. It read ghcr.io/ghcr.io/peopleforrester/backstage, a doubled path that resolved
+            # to a different, broken image, and the pod crash-looped with
+            # "Cannot find module '/app/packages/backend'". The correctly-pathed image is fine.
+            registry: ghcr.io
+            repository: peopleforrester/backstage
+            # 2026-07-27-3 carries the workshop app-config: guest auth-disable (D15), the
+            # argo-cd-argocd-server proxy name (D19), the catalog location pointed at the
+            # seeded platform repo, the /api argocd proxy target, and sqlite :memory:. The
+            # /app 0755 fix (from 2026-07-23-2) is in the Dockerfile, so it is baked here too.
+            tag: 2026-07-27-3
+          # The chart runs `node packages/backend`, which without args loads only the baked
+          # scaffold app-config.yaml, so none of the workshop config took effect and the
+          # catalog 401'd (this was the root of D15/D19). app-config.production.yaml is a
+          # complete config, so load it alone: loading the scaffold config too pulls in its
+          # example file locations, which are absent from the image and leave the catalog
+          # empty.
+          args:
+            - "--config"
+            - "app-config.production.yaml"
+          # Static in-cluster values the production config references by env.
+          extraEnvVars:
+            - name: GITEA_HOST
+              value: gitea-http.gitea.svc:3000
+            - name: BACKSTAGE_BASE_URL
+              value: http://backstage.backstage.svc:7007
+          # Gitea creds plus a minted ArgoCD token, assembled per cluster by the gitea-config
+          # seed job (manifests/seed-job.yaml). Backstage retries until the Secret exists.
+          extraEnvVarsSecrets:
+            - backstage-integrations
+        # The catalog store is sqlite in-memory (app-config.production.yaml), so the bundled
+        # PostgreSQL is unused. Disable it rather than run an idle StatefulSet + PVC.
+        postgresql:
+          enabled: false
+        service:
+          type: ClusterIP
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: backstage
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+# Built with the new backend system and the New Frontend System (default since
+# v1.49.0). Scaffolder templates use scaffolder.backstage.io/v1beta3 (Nunjucks).
+# Guest auth is the default, with the GitHub OAuth wiring present but commented out.
+# Switch it on if you have an OAuth app; the catalog and scaffolder work either way.
