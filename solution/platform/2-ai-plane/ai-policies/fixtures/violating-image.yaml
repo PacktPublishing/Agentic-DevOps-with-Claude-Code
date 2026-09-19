@@ -1,0 +1,18 @@
+# ABOUTME: Fixture for ai-restrict-image-registries. A kagent-namespace Pod pulling a
+# ABOUTME: non-GHCR image (docker.io). In enforce mode Kyverno denies it.
+#
+# Isolated to a single policy: the image is docker.io, which trips the registry policy.
+# Not synced by ArgoCD (fixtures/, not manifests/). Applied by hand to show the denial.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: violating-image
+  namespace: kagent
+  labels:
+    fixture: violating
+  annotations:
+    instrumentation.opentelemetry.io/inject-python: "true"
+spec:
+  containers:
+    - name: app
+      image: docker.io/library/nginx:1.27

@@ -1,0 +1,48 @@
+# ABOUTME: The agentgateway data path: the Gateway itself, the vLLM backend and route, and the
+# ABOUTME: prompt-guard policy. Separate from the agentgateway Application, which installs only the controller.
+#
+# Sync wave 3, one after the agentgateway controller (wave 2). A Gateway applied before its
+# controller exists is accepted by the API server and then sits unprogrammed, which reads as a
+# broken Gateway rather than an ordering problem.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agentgateway-runtime
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/platform/packt-agentic-devops.git
+    targetRevision: main
+    path: platform/2-ai-plane/agentgateway-runtime/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: agentgateway
+  syncPolicy:
+    # The Gateway's http listener admits routes by namespace LABEL, not by name, and the routes
+    # this component ships (vllm-qwen3, mcp-everything) live in `agentgateway` itself. Without
+    # this the Gateway refuses its own namespace's routes: `hostnames matched parent hostname "",
+    # but namespace "agentgateway" is not allowed by the parent`, which reads as a hostname
+    # problem and is not one. kagent gets the same label from a Namespace manifest beside the
+    # Gateway; agentgateway gets it here because the namespace is created by CreateNamespace
+    # rather than by a manifest, and a Namespace object owned by this Application would make a
+    # prune delete the whole namespace.
+    managedNamespaceMetadata:
+      labels:
+        agentic-platform.io/attach-agentgateway: "true"
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,49 @@
+# ABOUTME: Gateway API standard-channel CRDs, the prerequisite for kgateway and
+# ABOUTME: agentgateway. Applied from the upstream release with server-side apply.
+#
+# One owner for the Gateway API CRDs: this Application, not a controller's bundled
+# copy. kgateway and agentgateway consume gateway.networking.k8s.io/v1 (GA).
+#
+# VENDORED, not fetched. This previously pointed at github.com/kubernetes-sigs/gateway-api with
+# path config/crd/standard, which made ArgoCD's repo-server clone GitHub on every sync. Every Helm
+# chart is vendored into charts-vendor/ precisely so nothing waits on the network live, and these
+# CRDs are a harder dependency than any chart: the whole AI plane fails without them.
+#
+# It is also the defect class that already bit llm-d, whose remote kustomize base both violated the
+# same rule and pointed at a path that did not exist at the pinned ref. A pinned remote source still
+# depends on the remote keeping that path, which is not something a pin protects you from.
+#
+# Re-vendor with scripts/vendor-gateway-api-crds.sh when the pin moves. The files carry upstream's
+# own bundle-version and channel annotations, so what is vendored is checkable against the tag.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gateway-api-crds
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/platform/packt-agentic-devops.git
+    targetRevision: main
+    path: platform/2-ai-plane/gateway-api/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    # CRDs are cluster-scoped; this namespace is only the ArgoCD tracking default.
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      # The Gateway API CRDs exceed the client-side apply annotation limit.
+      - ServerSideApply=true

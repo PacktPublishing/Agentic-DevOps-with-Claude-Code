@@ -1,0 +1,144 @@
+# ABOUTME: AI-plane Kyverno policies in Audit mode, so the AI plane lands governed.
+# ABOUTME: Phase 8 flips these to Enforce. Audit reports, it does not block.
+#
+# Four policies, all rule-level failureAction: Audit (Kyverno 1.13+ field):
+#   1. agents reference an LLM Guard policy
+#   2. AI-namespace images come from the workshop GHCR namespace
+#   3. AI-namespace pods carry OTel instrumentation annotations
+#   4. agent-namespace pods do not hardcode an LLM endpoint that bypasses agentgateway
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: ai-require-llm-guard-reference
+  annotations:
+    policies.kyverno.io/title: Require LLM Guard Reference on Agents
+    policies.kyverno.io/category: AI Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Every kagent Agent should reference an LLM Guard policy via annotation, so
+      prompt-injection screening is wired in before the agent serves traffic.
+spec:
+  background: true
+  rules:
+    - name: agent-has-llm-guard-annotation
+      match:
+        any:
+          - resources:
+              kinds:
+                - kagent.dev/v1alpha2/Agent
+      validate:
+        failureAction: Audit
+        message: "Agents should set the agentic-platform.io/llm-guard-policy annotation."
+        pattern:
+          metadata:
+            annotations:
+              agentic-platform.io/llm-guard-policy: "?*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: ai-restrict-image-registries
+  annotations:
+    policies.kyverno.io/title: Restrict AI-Namespace Images to Workshop GHCR
+    policies.kyverno.io/category: AI Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Pods in AI-plane namespaces should pull only from the workshop GHCR namespace.
+      Mirrored images keep 300 clusters off public registry rate limits.
+spec:
+  background: true
+  rules:
+    - name: ai-images-from-workshop-ghcr
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - kagent
+                - kserve
+                - agentgateway
+                - kgateway-system
+                - llm-d
+      validate:
+        failureAction: Audit
+        message: "AI-plane images should come from the workshop GHCR namespace (ghcr.io/<workshop>/*)."
+        pattern:
+          spec:
+            containers:
+              - image: "ghcr.io/*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: ai-require-otel-annotations
+  annotations:
+    policies.kyverno.io/title: Require OTel Instrumentation Annotations
+    policies.kyverno.io/category: AI Observability
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      Pods in AI-plane namespaces should carry the OpenTelemetry auto-instrumentation
+      annotation, so GenAI spans flow to the collector from birth.
+spec:
+  background: true
+  rules:
+    - name: ai-pods-have-otel-annotation
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - kagent
+                - kserve
+      validate:
+        failureAction: Audit
+        message: "AI-plane pods should set an instrumentation.opentelemetry.io/inject-* annotation."
+        anyPattern:
+          - metadata:
+              annotations:
+                instrumentation.opentelemetry.io/inject-python: "?*"
+          - metadata:
+              annotations:
+                instrumentation.opentelemetry.io/inject-sdk: "?*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: ai-deny-llm-endpoint-bypass
+  annotations:
+    policies.kyverno.io/title: Deny LLM Endpoints That Bypass agentgateway
+    policies.kyverno.io/category: AI Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Agent-namespace pods should not hardcode an external LLM endpoint. LLM, MCP, and
+      A2A traffic goes through agentgateway, which applies mTLS, guardrails, and audit logging.
+spec:
+  background: true
+  rules:
+    - name: no-external-llm-base-url
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - kagent
+                - demo-apps
+      validate:
+        failureAction: Audit
+        message: >-
+          OPENAI_BASE_URL / model endpoints should point at the in-cluster agentgateway
+          or vLLM service, not an external LLM provider.
+        foreach:
+          - list: "request.object.spec.containers[]"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.env[?name=='OPENAI_BASE_URL'].value | [0] || '' }}"
+                    operator: AnyIn
+                    value:
+                      - "https://api.openai.com/*"
+                      - "https://api.anthropic.com/*"
+                      - "https://generativelanguage.googleapis.com/*"

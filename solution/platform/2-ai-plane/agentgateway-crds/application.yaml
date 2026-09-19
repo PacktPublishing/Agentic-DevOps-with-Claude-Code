@@ -1,0 +1,36 @@
+# ABOUTME: agentgateway CRDs, installed before the agentgateway controller.
+# ABOUTME: Native OCI Helm chart from cr.agentgateway.dev, not the legacy kgateway charts.
+#
+# agentgateway is a Linux Foundation (Agentic AI Foundation) project, NOT CNCF, and a
+# sibling of kgateway, not its data plane. Install from its own registry.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agentgateway-crds
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: cr.agentgateway.dev/charts
+    chart: agentgateway-crds
+    targetRevision: v1.3.0
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: agentgateway
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

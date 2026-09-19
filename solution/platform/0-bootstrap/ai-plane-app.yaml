@@ -1,0 +1,32 @@
+# AI-plane App-of-Apps. Applied live at the start of Module 2. Points ArgoCD at
+# platform/2-ai-plane in this repo and recurses for the per-component Application manifests,
+# so the AI plane lands through the same GitOps path the foundation plane used.
+#
+# Raw manifests under each component's manifests/ subdir are owned by that component's own
+# Application, not applied directly by this plane app (same include rule as the foundation
+# root app).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-ai-plane
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/platform/packt-agentic-devops.git
+    targetRevision: main
+    path: platform/2-ai-plane
+    directory:
+      recurse: true
+      include: "*/application.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

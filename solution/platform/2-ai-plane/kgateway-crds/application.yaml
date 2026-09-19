@@ -1,0 +1,36 @@
+# ABOUTME: kgateway CRDs, installed before the kgateway controller.
+# ABOUTME: OCI Helm chart from the kgateway registry. CRDs are gateway.kgateway.dev/v1alpha1.
+#
+# ArgoCD OCI Helm: repoURL carries no oci:// prefix; chart and targetRevision name
+# the artifact and tag. kgateway is CNCF Sandbox; lock to the stable patch, no alpha.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kgateway-crds
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: cr.kgateway.dev/kgateway-dev/charts
+    chart: kgateway-crds
+    targetRevision: v2.3.4
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kgateway-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

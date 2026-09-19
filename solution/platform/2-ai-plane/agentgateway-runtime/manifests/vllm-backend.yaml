@@ -1,0 +1,53 @@
+# ABOUTME: Routes model traffic through agentgateway to the in-cluster vLLM, so LLM calls are
+# ABOUTME: mediated and observable instead of going straight from agent to predictor.
+#
+# Why route model traffic through the gateway when the agent could call the predictor directly:
+# a direct call is invisible. The guardrail, the audit record, and the gen_ai spans all come from
+# the mediation point. `ai-deny-llm-endpoint-bypass` in the AI policy set exists to stop workloads
+# taking the direct path, and this is the path it expects them to take instead.
+#
+# Schema verified against the vendored CRDs (charts-vendor/agentgateway-crds-v1.3.0.tgz):
+# group is `agentgateway.dev/v1alpha1`, and host/port sit under `spec.ai.provider` alongside the
+# provider block, not directly under `spec.ai`. The provider key is `openai`, lower case.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: vllm-qwen3
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  ai:
+    provider:
+      # KServe RawDeployment names the predictor Service after the InferenceService (`qwen3`),
+      # and port 80 forwards to the container's 8000.
+      host: qwen3-predictor.kserve.svc.cluster.local
+      port: 80
+      openai:
+        model: qwen3-1.7b
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: vllm-qwen3
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  parentRefs:
+    # group and kind are CRD defaults. Written out because Argo CD compares the manifest
+    # against the defaulted live object and reports a permanent OutOfSync otherwise:
+    # a diff that never resolves trains people to ignore the one that matters.
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway-proxy
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: vllm-qwen3
+          weight: 1

@@ -1,0 +1,50 @@
+# ABOUTME: Ships an access-log record for every request crossing the gateway to the OTel collector,
+# ABOUTME: so agent traffic is attributable rather than merely guarded.
+#
+# This existed as a CLAIM before it existed as configuration. Several reader-facing files stated
+# that agentgateway "applies mTLS, audit logging, and the LLM Guard guardrail", and audit was never
+# configured: the chart has no audit value key, and nothing applied it at runtime either. mTLS is
+# configured in mtls-gateway.yaml; that half of the claim was always achievable and a previous
+# revision of this comment wrongly said otherwise.
+#
+# Audit is worth building rather than deleting, because it is the half the platform's governance
+# story actually rests on. A guardrail tells you a bad prompt was refused. The audit record tells
+# you who asked, for what, and when, which is what "attributable" means and what the Phase 8
+# governance beat inspects.
+#
+# Schema verified against charts-vendor/agentgateway-crds-v1.3.0.tgz: accessLog lives under
+# spec.frontend, its otlp block requires a backendRef, and attributes.add takes name/expression
+# pairs.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: gateway-audit-log
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway-proxy
+  frontend:
+    accessLog:
+      otlp:
+        # The collector the observability plane already runs; it forwards to Tempo. Sending audit
+        # to the same collector as traces means one pipeline to operate and one place where a
+        # dropped record shows up, rather than a second path that can fail silently.
+        backendRef:
+          kind: Service
+          name: opentelemetry-collector
+          namespace: observability
+          port: 4317
+        protocol: GRPC
+      attributes:
+        add:
+          # Attribution is the point. Without the caller identity a log line records that something
+          # happened and not who did it, which reads as a complete audit trail while supporting no
+          # governance claim at all.
+          - name: agentic_platform.route
+            expression: request.path
+          - name: agentic_platform.method
+            expression: request.method

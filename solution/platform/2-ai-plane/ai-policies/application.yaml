@@ -1,0 +1,49 @@
+# ABOUTME: ArgoCD Application for the AI-plane Kyverno policies (Audit mode).
+# ABOUTME: Syncs after Kyverno CRDs exist. Phase 8 flips these policies to Enforce.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ai-policies
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/platform/packt-agentic-devops.git
+    targetRevision: main
+    path: platform/2-ai-plane/ai-policies/manifests
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  # Kyverno's admission webhook defaults several fields onto every ClusterPolicy after apply
+  # (spec.admission, spec.emitWarning, spec.validationFailureAction, and the per-rule
+  # spec.rules[].skipBackgroundRequests and .validate.allowExistingViolations), which the
+  # manifests do not set, so ArgoCD sees drift and the app never reaches Synced. Ignore them
+  # with jq paths. Ignoring validationFailureAction also lets the Phase 8 flip to Enforce
+  # persist instead of being reverted by selfHeal.
+  ignoreDifferences:
+    - group: kyverno.io
+      kind: ClusterPolicy
+      jqPathExpressions:
+        - .spec.admission
+        - .spec.emitWarning
+        - .spec.validationFailureAction
+        - .spec.rules[].skipBackgroundRequests
+        - .spec.rules[].validate.allowExistingViolations
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - ServerSideApply=true

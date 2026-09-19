@@ -1,0 +1,27 @@
+# ABOUTME: The control for violating-agent.yaml: identical except that it carries the guardrail
+# ABOUTME: annotation, so admission must ADMIT it even under enforce.
+#
+# Why a positive control is not optional. A policy that denies everything also denies
+# violating-agent.yaml, so the denial demo passes just as convincingly against a broken rule as
+# against a working one. Applying this immediately afterwards is what shows the rule is specific
+# rather than merely strict, and it takes about five seconds to check.
+#
+# Differs from violating-agent.yaml in exactly one line: the llm-guard-policy annotation.
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: governed-agent
+  namespace: kagent
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+    fixture: known-good
+  annotations:
+    agentic-platform.io/llm-guard-policy: default-injection-scan
+    instrumentation.opentelemetry.io/inject-python: "true"
+spec:
+  type: Declarative
+  declarative:
+    modelConfig: vllm-qwen3
+    systemMessage: >-
+      A correctly governed agent used only to prove the policy admits what it should.
+      It carries the guardrail reference the platform requires.

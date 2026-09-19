@@ -1,0 +1,29 @@
+# ABOUTME: B16/P16 primary fixture. A kagent Agent with NO llm-guard-policy annotation.
+# ABOUTME: Trips ai-require-llm-guard-reference. In enforce mode Kyverno denies it.
+#
+# This is the fixture the denial exercise applies. It is the demo-agent's Agent minus the
+# agentic-platform.io/llm-guard-policy annotation and nothing else, so the only reason it is denied
+# is the missing guardrail reference. It keeps the OTel annotation deliberately: if it were missing
+# both, a denial would not tell you which rule fired, and the demo would prove less than it appears
+# to. known-good-agent.yaml is the control.
+#
+# It lives in fixtures/ (not manifests/) so ArgoCD never syncs it: the Application syncs
+# manifests/ only. It exists to be applied by hand and rejected.
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: unguarded-agent
+  namespace: kagent
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+    fixture: violating
+  annotations:
+    # Present on purpose. The ONLY thing missing is the guardrail reference.
+    instrumentation.opentelemetry.io/inject-python: "true"
+spec:
+  type: Declarative
+  declarative:
+    modelConfig: vllm-qwen3
+    systemMessage: >-
+      A deliberately unguarded agent used only to demonstrate policy enforcement.
+      It has no LLM Guard reference, so the platform should refuse to admit it.

@@ -1,0 +1,79 @@
+# ABOUTME: The Gateway the AI plane actually serves traffic on. Installing the controller does
+# ABOUTME: not create one, so without this the AI plane has a control plane and no data path.
+#
+# The agentgateway Application installs the controller only. A controller with no Gateway
+# reconciles nothing, and the symptom is subtle: every Application is Synced and Healthy, and
+# every route sits Accepted=False with "no parent found", which reads as a route problem rather
+# than a missing Gateway.
+#
+# LISTENER NAMESPACE POLICY IS `Selector`, NOT `Same`.
+#
+# `Same` restricts attachment to routes in the Gateway's own namespace (agentgateway). The
+# generated agent routes live in `kagent`, so under `Same` every route the golden path produces
+# is silently refused: the HTTPRoute exists, the Gateway exists, and nothing joins them. The
+# selector opts a namespace in explicitly by label, which is narrower than `All` and auditable:
+# a namespace can only attach if someone labelled it.
+# THE NAME IS `agentgateway-proxy`, AND IT MUST NOT BE `agentgateway`.
+#
+# The controller materialises every Gateway into a Deployment named after the Gateway, in the
+# Gateway's namespace. The agentgateway chart's own release is `agentgateway` in namespace
+# `agentgateway`, and it too creates a Deployment by that name: the controller itself. Name the
+# Gateway `agentgateway` and the controller tries to apply its proxy Deployment over its own,
+# whose spec.selector is immutable. It fails with `field is immutable`, the Gateway sits
+# Programmed=False forever, and the Application is Degraded with every manifest valid and every
+# sync task reported successful. Caught on a live cluster 2026-09-17; the mtls Gateway beside it
+# was healthy only because its name happened not to collide.
+# `tests/test_agentgateway_manifests.py::test_no_gateway_collides_with_a_helm_release_in_its_namespace`
+# fails the build on a recurrence.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: agentgateway-proxy
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  # The Service agentgateway's deployer creates for this Gateway is `type: LoadBalancer`, and that
+  # is not configurable from here. What IS configurable is who provisions it, and these annotations
+  # decide that.
+  #
+  # Without them the Service carries no loadBalancerClass and no AWS type annotation, and because
+  # the load balancer controller is installed with enableServiceMutatorWebhook: false it never
+  # claims the Service. It falls through to the legacy in-tree cloud provider, which provisions a
+  # CLASSIC load balancer that is INTERNET-FACING BY DEFAULT, on the public subnets the lab VPC
+  # tags for exactly that purpose. Nothing errors. The lab path quietly acquires a public address.
+  #
+  # `type: external` routes provisioning through the AWS Load Balancer Controller instead, and
+  # `scheme: internal` keeps it on the private subnets, which is what an in-cluster lab path should
+  # be. ip targets reach pods directly.
+  #
+  # spec.infrastructure.annotations is standard Gateway API and propagates to the generated
+  # Service, so this stays portable rather than depending on an agentgateway-specific parameters
+  # object.
+  infrastructure:
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+  gatewayClassName: agentgateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8080
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              agentic-platform.io/attach-agentgateway: "true"
+---
+# The label that opts kagent in. Applied here rather than on the namespace manifest so the
+# attachment policy and the thing it permits are read together; a reader who finds the selector
+# above should not have to search for what satisfies it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kagent
+  labels:
+    agentic-platform.io/attach-agentgateway: "true"
+    app.kubernetes.io/part-of: agentic-platform

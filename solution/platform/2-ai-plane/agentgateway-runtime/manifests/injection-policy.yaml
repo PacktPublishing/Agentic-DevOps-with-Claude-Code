@@ -1,0 +1,65 @@
+# ABOUTME: Sends every prompt through LLM Guard before it reaches a model, as gateway policy
+# ABOUTME: rather than something each agent has to remember to call.
+#
+# The point of enforcing here: a guardrail an agent opts into is a guardrail the next agent
+# forgets. Attached to the backend, it covers traffic on that path including routes the golden
+# path generates later that nobody reviewed.
+#
+# The webhook contract is agentgateway's, not LLM Guard's. agentgateway POSTs to the webhook
+# before the model call and again on the response, and expects a verdict. LLM Guard does not speak
+# that contract, so a small adapter translates; it ships in the llm-guard component beside the
+# scanner it wraps.
+#
+# failureMode FailClosed is deliberate. If the scanner is unreachable, prompts are refused rather
+# than passed unscanned: a guardrail that fails open is one an attacker only has to knock over.
+#
+# Schema verified against the vendored CRDs: promptGuard sits under `spec.backend.ai`, request and
+# response are ARRAYS of guard entries, and each webhook takes a `backendRef` (a Service by
+# default) rather than host/port fields. failureMode is FailClosed/FailOpen, not Deny/Allow.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: default-injection-scan
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  targetRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: vllm-qwen3
+  backend:
+    ai:
+      promptGuard:
+        request:
+          - webhook:
+              # NO `action` FIELD HERE. It does not exist on agentgateway v1.3.0: the webhook
+              # schema carries only backendRef, failureMode and forwardHeaderMatches. Adding it
+              # fails the sync outright with `field not declared in schema`, and the policy is
+              # never created at all, so the guardrail silently does not exist.
+              #
+              # `failureMode: FailClosed` below is the control that matters at this version: if
+              # the scanner cannot be reached, the request is refused rather than waved through.
+              backendRef:
+                group: ""
+                kind: Service
+                name: llm-guard-adapter
+                namespace: kagent
+                port: 8000
+              failureMode: FailClosed
+        response:
+          - webhook:
+              # NO `action` FIELD HERE. It does not exist on agentgateway v1.3.0: the webhook
+              # schema carries only backendRef, failureMode and forwardHeaderMatches. Adding it
+              # fails the sync outright with `field not declared in schema`, and the policy is
+              # never created at all, so the guardrail silently does not exist.
+              #
+              # `failureMode: FailClosed` below is the control that matters at this version: if
+              # the scanner cannot be reached, the request is refused rather than waved through.
+              backendRef:
+                group: ""
+                kind: Service
+                name: llm-guard-adapter
+                namespace: kagent
+                port: 8000
+              failureMode: FailClosed

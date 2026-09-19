@@ -1,0 +1,42 @@
+# ABOUTME: The agentgateway controller. Mediates LLM, MCP, and A2A traffic.
+# ABOUTME: Installs the control plane only; traffic policy is runtime, not Helm values.
+#
+# Verified against the v1.3.0 chart (helm show values, 2026-07-25): it has no mtls or
+# audit value keys. An earlier draft claimed "mTLS and audit logging are enabled through
+# chart values" and carried a commented mtls.enabled/audit.enabled block; those keys do
+# not exist, so uncommenting them would do nothing. The only transport value the chart
+# exposes is controller.xds.mode (plaintext/tls/either, already tls) for the xDS control
+# plane. mTLS and audit for agent traffic are gateway configuration applied at runtime, not
+# install-time Helm values: see agentgateway-runtime/manifests/mtls-gateway.yaml and
+# audit-policy.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agentgateway
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: cr.agentgateway.dev/charts
+    chart: agentgateway
+    targetRevision: v1.3.0
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: agentgateway
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

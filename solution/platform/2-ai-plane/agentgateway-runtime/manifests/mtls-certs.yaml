@@ -1,0 +1,69 @@
+# ABOUTME: The certificate material the mTLS Gateway references, issued in-cluster by cert-manager.
+# ABOUTME: Without it the listener sits on "Bad TLS configuration" and terminates nothing.
+#
+# mtls-gateway.yaml named a server Secret and a client CA that nothing produced. Every manifest
+# validated, the Application synced, the Gateway reported Programmed=True, and the listener carried
+# `Bad TLS configuration` with zero attached routes. A Gateway that claims a security control and
+# cannot complete a handshake is worse than no Gateway, so the material is built here rather than
+# left to a manual step.
+#
+# Nothing here is a credential in Git. cert-manager mints the key in the cluster; the repo carries
+# only the instruction to mint it. That keeps the zero-real-credentials rule intact.
+#
+# The chain is deliberate: `selfsigned` (a ClusterIssuer the foundation already ships) signs a CA,
+# and that CA signs the server certificate. A single self-signed server certificate would leave
+# nothing to validate clients against, which is the whole point of the frontend validation block.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: agentgateway-ca
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  isCA: true
+  commonName: agentgateway-client-ca
+  secretName: agentgateway-ca-tls
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+# The CA above, expressed as something that can sign. cert-manager needs the Issuer as a separate
+# object; the Certificate alone only produces the key pair.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: agentgateway-ca
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  ca:
+    secretName: agentgateway-ca-tls
+---
+# The server certificate the https listener terminates with. The dnsNames are the in-cluster
+# Service names the deployer creates for the Gateway `agentgateway-mtls`: a certificate for any
+# other name fails verification at the client rather than at apply time.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: agentgateway-server-tls
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  secretName: agentgateway-server-tls
+  dnsNames:
+    - agentgateway-mtls.agentgateway.svc.cluster.local
+    - agentgateway-mtls.agentgateway.svc
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: agentgateway-ca
+    kind: Issuer
+    group: cert-manager.io

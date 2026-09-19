@@ -1,0 +1,96 @@
+# ABOUTME: The mutual-TLS Gateway. Client certificates are validated at the edge, so an unauthorized
+# ABOUTME: workload is refused during the TLS handshake rather than at an application policy later.
+#
+# Client validation is configured Gateway-wide through spec.tls.frontend, NOT per-listener. That is
+# the part worth knowing, because there is an older, removed spelling that looks like the answer and
+# is not: listeners[].tls.frontendValidation existed in Gateway API v1.3.0's experimental channel and
+# was removed in v1.4.0. Searching for it on a current release finds nothing and invites the wrong
+# conclusion, which is that Gateway API cannot do client-cert mTLS at all. It can. The capability
+# moved to spec.tls.frontend and is in the STANDARD channel.
+#
+# Verified against the vendored CRD (gateway-api/manifests, bundle v1.5.1, channel standard):
+# spec.tls.frontend.default.validation takes mode and caCertificateRefs, and mode enumerates
+# AllowValidOnly and AllowInsecureFallback. tests/test_agentgateway_manifests.py validates this file
+# against that CRD, so a schema change fails a test rather than a sync.
+#
+# AllowValidOnly is the whole point: a client without a certificate signed by the configured CA
+# cannot complete the handshake. AllowInsecureFallback would accept them and defeat the control.
+#
+# Prerequisites, created outside this manifest: the Secret agentgateway-server-tls (the Gateway's own
+# certificate, from cert-manager) and the ConfigMap agentgateway-client-ca (the CA that signs client
+# certificates). This Gateway will not program until both exist.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: agentgateway-mtls
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  # The Service agentgateway's deployer creates for this Gateway is `type: LoadBalancer`, and that
+  # is not configurable from here. What IS configurable is who provisions it, and these annotations
+  # decide that.
+  #
+  # Without them the Service carries no loadBalancerClass and no AWS type annotation, and because
+  # the load balancer controller is installed with enableServiceMutatorWebhook: false it never
+  # claims the Service. It falls through to the legacy in-tree cloud provider, which provisions a
+  # CLASSIC load balancer that is INTERNET-FACING BY DEFAULT, on the public subnets the lab VPC
+  # tags for exactly that purpose. Nothing errors. The lab path quietly acquires a public address.
+  #
+  # `type: external` routes provisioning through the AWS Load Balancer Controller instead, and
+  # `scheme: internal` keeps it on the private subnets, which is what an in-cluster lab path should
+  # be. ip targets reach pods directly.
+  #
+  # spec.infrastructure.annotations is standard Gateway API and propagates to the generated
+  # Service, so this stays portable rather than depending on an agentgateway-specific parameters
+  # object.
+  infrastructure:
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+  gatewayClassName: agentgateway
+  tls:
+    frontend:
+      default:
+        validation:
+          mode: AllowValidOnly
+          # The CA cert-manager mints in mtls-certs.yaml. Gateway API requires implementations to
+          # support ConfigMap here and leaves Secret optional, so this is an agentgateway-specific
+          # choice, not a portable one. It is taken because cert-manager writes its CA to a Secret
+          # and nothing else has to exist to copy it into a ConfigMap: no trust-manager, no seed
+          # Job, nothing to drift.
+          #
+          # Verified on agentgateway v1.5.0 on 2026-09-17, with a negative control rather than
+          # from the status alone. Pointed at a name that does not exist, the listener reports
+          # `invalid CA certificate reference, secret agentgateway/does-not-exist not found`;
+          # pointed back at the real Secret it returns to Accepted=True with an empty message. So
+          # the reference is genuinely resolved and the earlier Accepted was not stale status.
+          #
+          # If this ever moves to a different Gateway implementation, check that it reads Secrets
+          # here before assuming this keeps working, and fall back to a ConfigMap plus a mechanism
+          # to fill it.
+          caCertificateRefs:
+            - name: agentgateway-ca-tls
+              kind: Secret
+              group: ""
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 8443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          # group "" is the core API group and is a CRD default; written out for the same
+          # reason as the parentRef fields in the routes.
+          - group: ""
+            kind: Secret
+            name: agentgateway-server-tls
+      allowedRoutes:
+        namespaces:
+          # Selector, matching the plaintext Gateway: the generated agent routes live in kagent, and
+          # `Same` would silently refuse every one of them.
+          from: Selector
+          selector:
+            matchLabels:
+              agentic-platform.io/attach-agentgateway: "true"

@@ -1,0 +1,46 @@
+# ABOUTME: The agentgateway route for MCP traffic, so agent tool calls traverse the same mediation
+# ABOUTME: point as model calls instead of reaching the MCP server directly.
+#
+# Schema verified against the vendored CRDs: spec.mcp requires `targets`, each target requires a
+# `name`, and a static target carries host/port/path/protocol.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: mcp-everything
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  mcp:
+    targets:
+      - name: everything
+        static:
+          # The KMCP-managed Service for the `everything` MCPServer in the kagent namespace.
+          host: everything.kagent.svc.cluster.local
+          port: 3000
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-everything
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  parentRefs:
+    # group and kind are CRD defaults. Written out because Argo CD compares the manifest
+    # against the defaulted live object and reports a permanent OutOfSync otherwise:
+    # a diff that never resolves trains people to ignore the one that matters.
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway-proxy
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /mcp
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: mcp-everything
+          weight: 1
