@@ -1,0 +1,86 @@
+# ABOUTME: The kagent controller. Reconciles Agent, ModelConfig, and Team CRDs.
+# ABOUTME: Model routing is defined per-agent by a ModelConfig, not here.
+#
+# The controller installs with no external model credentials. The demo agent's
+# ModelConfig points at the in-cluster vLLM OpenAI-compatible endpoint, so there is
+# no external API spend and no external credentials.
+#
+# The chart's built-in agents (k8s, istio, cilium, helm, etc.) default to the OpenAI
+# provider and require a kagent-openai Secret; on a vLLM-only platform they
+# CreateContainerConfigError. The chart's openAI provider has no baseURL override, so
+# they cannot be pointed at the in-cluster vLLM through values. Disable them; the custom
+# demo agent (its own ModelConfig -> vLLM) is the one the workshop drives. This also
+# frees ~11 pods.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kagent
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ghcr.io/kagent-dev/kagent/helm
+    chart: kagent
+    targetRevision: "0.9.9"
+    helm:
+      valuesObject:
+        k8s-agent: { enabled: false }
+        kgateway-agent: { enabled: false }
+        istio-agent: { enabled: false }
+        promql-agent: { enabled: false }
+        observability-agent: { enabled: false }
+        argo-rollouts-agent: { enabled: false }
+        helm-agent: { enabled: false }
+        cilium-policy-agent: { enabled: false }
+        cilium-manager-agent: { enabled: false }
+        cilium-debug-agent: { enabled: false }
+        querydoc: { enabled: false }
+        # AGENT TRACING IS OFF BY DEFAULT IN THIS CHART, AND NOTHING ELSE TURNS IT ON.
+        #
+        # The AI plane's observability story is that agent calls produce gen_ai.* spans in Tempo.
+        # They did not, and the reason was not subtle once measured: the agent pod carried
+        # OTEL_TRACING_ENABLED=false and OTEL_LOGGING_ENABLED=false, which are the chart defaults.
+        #
+        # The repo was relying on `instrumentation.opentelemetry.io/inject-python` on the Agent CR
+        # instead, and that annotation cannot work here on three separate counts. The agent runs
+        # ghcr.io/kagent-dev/kagent/golang-adk, a Go binary, so the Python instrumentation would
+        # not attach to it. The kagent controller does not copy the Agent CR's annotations onto the
+        # Deployment it generates, so the OTel Operator never sees it. And no Instrumentation
+        # resource exists in the cluster for the operator to act on even if it did.
+        #
+        # kagent exports natively, so this is the path that works. The annotation stays because a
+        # Kyverno policy requires it, but it is not what produces the traces.
+        otel:
+          tracing:
+            enabled: true
+            exporter:
+              otlp:
+                endpoint: opentelemetry-collector.observability.svc.cluster.local:4317
+                protocol: grpc
+                insecure: true
+          logging:
+            enabled: true
+            exporter:
+              otlp:
+                endpoint: opentelemetry-collector.observability.svc.cluster.local:4317
+                insecure: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kagent
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

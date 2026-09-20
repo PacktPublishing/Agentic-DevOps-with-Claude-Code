@@ -1,0 +1,94 @@
+# ABOUTME: The demo kagent Agent and its ModelConfig, routed at the in-cluster vLLM.
+# ABOUTME: No external LLM spend and no external credentials in the default path.
+#
+# Confirm the kagent ModelConfig and Agent v1alpha2 field names against the 0.9.9
+# chart before the freeze. Known-correct facts: apiVersion kagent.dev/v1alpha2; the
+# Agent field is systemMessage, nested under spec.type and spec.declarative; agents
+# run on Google ADK. The ModelConfig points at the OpenAI-compatible vLLM endpoint.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vllm-openai-key
+  namespace: kagent
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+type: Opaque
+stringData:
+  # vLLM does not check the key, but the OpenAI client requires a non-empty value.
+  # This is a placeholder, not a real credential.
+  OPENAI_API_KEY: "sk-local-vllm-not-a-real-key"
+---
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: vllm-qwen3
+  namespace: kagent
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  provider: OpenAI
+  model: qwen3-1.7b
+  apiKeySecret: vllm-openai-key
+  apiKeySecretKey: OPENAI_API_KEY
+  openAI:
+    # THROUGH THE GATEWAY, not straight at the predictor.
+    #
+    # This pointed at qwen3-predictor.kserve.svc directly, which reaches the model and skips every
+    # control the AI plane exists to apply. The prompt-injection scan is attached to the
+    # vllm-qwen3 AgentgatewayBackend, so a direct call never crosses it: the guardrail was
+    # installed, healthy, and inert for the one agent this platform ships.
+    #
+    # The gateway listens on 8080 and its /v1 route forwards to that backend, so this path is the
+    # same model with the scan, the audit access log, and the gen_ai spans attached. The predictor
+    # Service (RawDeployment exposes <name>-predictor on 80 -> 8000) is still what the backend
+    # points at; it is simply no longer what the agent points at.
+    baseUrl: http://agentgateway-proxy.agentgateway.svc.cluster.local:8080/v1
+---
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: platform-helper
+  namespace: kagent
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+  annotations:
+    # Satisfies ai-require-llm-guard-reference. agentgateway applies the guardrail.
+    agentic-platform.io/llm-guard-policy: default-injection-scan
+    # Satisfies ai-require-otel-annotations, and it was missing. The generated agents from the
+    # golden path carry it, this one did not, so the reference agent violated a policy the
+    # platform enforces on the agents readers create. test_generated_agents_are_governed
+    # iterates every Agent in the namespace, so it failed here too.
+    instrumentation.opentelemetry.io/inject-python: "true"
+spec:
+  type: Declarative
+  declarative:
+    modelConfig: vllm-qwen3
+    systemMessage: >-
+      You are the platform helper for an agentic Internal Developer Platform built on
+      Kubernetes. Answer questions about the platform's components and golden paths.
+      Keep answers short and concrete. If you do not know, say so.
+    # Tool binding. Without this the agent has a model and no tools, which demonstrates nothing
+    # about tool authorization: the interesting property of an agent platform is not that an agent
+    # can call a tool, it is that you decided which tools and which need a human first.
+    #
+    # Schema verified against charts-vendor/kagent-crds-0.9.9.tgz. `tools` is an array under
+    # spec.declarative, each entry is discriminated by `type` (McpServer | Agent), and a CEL rule
+    # on the CRD enforces that every requireApproval entry also appears in toolNames. Listing a
+    # tool for approval that is not allow-listed is rejected by the API server, not ignored.
+    tools:
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: everything-through-gateway
+          # Allow-list, not a filter. The `everything` reference server exposes far more than
+          # these two; naming them is the authorization decision.
+          toolNames:
+            - echo
+            - add
+          # `add` mutates nothing, but it stands in for the class of tool that should pause for a
+          # human. Requiring approval on the harmless one is how the mechanism gets demonstrated
+          # without the demo needing a dangerous tool to be convincing.
+          requireApproval:
+            - add

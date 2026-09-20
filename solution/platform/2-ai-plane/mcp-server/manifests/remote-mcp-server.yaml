@@ -1,0 +1,31 @@
+# ABOUTME: Registers the MCP "everything" server with kagent as a RemoteMCPServer reached THROUGH
+# ABOUTME: agentgateway, so tool calls are mediated and audited rather than going direct.
+#
+# There are two ways an agent can reach this MCP server, and the difference is the whole point of
+# the AI plane. Direct to the KMCP Service, tool calls are invisible: no guardrail, no audit record,
+# no span. Through agentgateway, the same calls pass the mediation point that produces all three.
+#
+# So the url below is the gateway, not the MCP Service. `ai-deny-llm-endpoint-bypass` exists to stop
+# workloads taking the direct path.
+#
+# Schema verified against charts-vendor/kagent-crds-0.9.9.tgz: RemoteMCPServer is
+# kagent.dev/v1alpha2, `description` and `url` are BOTH required, and `protocol` is
+# SSE | STREAMABLE_HTTP defaulting to STREAMABLE_HTTP.
+#
+# STREAMABLE_HTTP is stated explicitly rather than left to the default, because the transport is the
+# thing most likely to be wrong after an MCP revision: HTTP+SSE is the deprecated transport, and a
+# server that silently falls back to it still works until it does not.
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: everything-through-gateway
+  namespace: kagent
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  description: >-
+    The MCP "everything" reference server, reached through agentgateway so tool calls are
+    guarded, audited, and traced. Used by the demo agent to demonstrate tool authorization.
+  url: http://agentgateway-proxy.agentgateway.svc.cluster.local:8080/mcp
+  protocol: STREAMABLE_HTTP
+  timeout: 30s

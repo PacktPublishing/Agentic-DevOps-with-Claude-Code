@@ -1,0 +1,36 @@
+# ABOUTME: kagent CRDs, installed before the kagent controller.
+# ABOUTME: OCI Helm chart from ghcr.io/kagent-dev. Agent CRD is kagent.dev/v1alpha2.
+#
+# kagent is CNCF Sandbox and runs agents on Google ADK. Kinds: Agent, ModelConfig,
+# RemoteMCPServer/MCPServer, Team. The Agent field is systemMessage (not systemPrompt).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kagent-crds
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ghcr.io/kagent-dev/kagent/helm
+    chart: kagent-crds
+    targetRevision: "0.9.9"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kagent
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

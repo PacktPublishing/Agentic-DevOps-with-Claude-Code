@@ -1,0 +1,10 @@
+# ABOUTME: Dependencies for the probe and benchmark scripts (probe_model, inference_probe,
+# ABOUTME: benchmark_inference, trace_probe, verify_audit_event).
+#
+# Deliberately one dependency. Everything else these scripts need is in the standard library, and
+# a reader running a probe against their own cluster should not have to resolve a tree to do it.
+# Pinned rather than floated so a run in six months behaves the way the book describes.
+#
+# Install:  pip install -r scripts/requirements-trace.txt
+# Or:       uv run --with-requirements scripts/requirements-trace.txt python scripts/trace_probe.py
+requests==2.34.2

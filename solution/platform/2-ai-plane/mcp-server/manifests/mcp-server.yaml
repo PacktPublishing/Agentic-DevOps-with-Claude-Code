@@ -1,0 +1,67 @@
+# ABOUTME: A demo MCP server (the canonical "everything" reference server) managed by
+# ABOUTME: KMCP, so the demo agent has an MCP target to reach through agentgateway.
+#
+# KMCP (the MCP controller) and kagent-tools ship inside the kagent chart, so the
+# MCPServer CRD (kagent.dev/v1alpha1) and controller already exist. This is the demo
+# server it manages. Image is a prebuilt, mirrored MCP everything server (no npx-at-runtime
+# so nothing waits on the network live). Confirm the KMCP transport/deployment fields and
+# the exact everything-server image against the pinned KMCP version before the freeze.
+apiVersion: kagent.dev/v1alpha1
+kind: MCPServer
+metadata:
+  name: everything
+  namespace: kagent
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  transportType: stdio
+  stdioTransport: {}
+  deployment:
+    # Official mcp/everything image, mirrored to GHCR.
+    #
+    # THE STDIO COMMAND IS REQUIRED, and an earlier comment here claimed the opposite: that KMCP
+    # would fall through to the image entrypoint so no cmd/args were needed. It does not. KMCP
+    # replaces the entrypoint with its own adapter and the adapter relays to whatever `cmd` names.
+    # Leave it empty and the pod reports Running, the MCPServer reports Ready, and every MCP call
+    # returns `fail to create relay: failed to run command '""'`. The agent then answers
+    # `failed to extract tools from the tool set "mcp_tool_set"` and has no tools at all, which
+    # reads as a gateway or protocol problem rather than an empty field.
+    #
+    # Read out of the image rather than assumed: WORKDIR is /app and package.json
+    # (@modelcontextprotocol/server-everything) declares `start: node dist/index.js`.
+    # Pinned by digest: the GHCR mirror of the MCP "everything" reference server publishes only a
+    # :latest tag, so the digest is the deterministic pin (no floating :latest, per the repo's
+    # pinning rule). Re-resolve and update at the version freeze.
+    image: ghcr.io/peopleforrester/mcp-server-everything@sha256:330885a0c4b2eed6f0cd3aae0f0b37152ccdf2852e2f6af6d616a5d5c1e9817d
+    cmd: node
+    args: ["dist/index.js"]
+    port: 3000
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "250m"
+        memory: "256Mi"
+    # BOTH IMAGES IN THIS POD RUN AS ROOT, so `runAsNonRoot: true` with no numeric `runAsUser`
+    # is rejected by the kubelet before the container ever starts:
+    #   Error: container has runAsNonRoot and image will run as root
+    # It failed 1,584 times over six hours while the platform reported every Application Synced
+    # and Healthy, because Argo CD has no health check for an MCPServer.
+    #
+    # The uid has to be set on the POD, not only the container. KMCP injects a `copy-binary` init
+    # container running ghcr.io/agentgateway/agentgateway:0.9.0-musl, which also runs as root, and
+    # it writes the adapter binary into an emptyDir. Without fsGroup that volume is root-owned and
+    # a uid-1000 init container cannot write to it.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]

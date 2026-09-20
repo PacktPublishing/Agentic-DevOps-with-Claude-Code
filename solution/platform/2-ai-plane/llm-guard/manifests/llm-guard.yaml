@@ -1,0 +1,89 @@
+# ABOUTME: LLM Guard API as a plain Deployment plus Service in the kagent namespace.
+# ABOUTME: No upstream Helm chart exists; the project is dormant, so the image is pinned.
+#
+# Image is the mirrored copy under the workshop GHCR namespace (no docker.io in any
+# manifest). The mirror script re-hosts laiyer/llm-guard-api:0.3.16. Powers the
+# prompt-injection block demo. agentgateway calls this as a guardrail backend.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-guard
+  namespace: kagent
+  labels:
+    app: llm-guard
+    version: "0.3.16"
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-guard
+  template:
+    metadata:
+      labels:
+        app: llm-guard
+        version: "0.3.16"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: llm-guard
+          image: ghcr.io/peopleforrester/llm-guard-api:0.3.16
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          securityContext:
+            # The image declares a non-numeric USER "user" (uid 1000), which fails
+            # kubelet's runAsNonRoot check. Pin the matching numeric UID so the container
+            # runs as the user that owns /home/user and the baked scanner model cache.
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-guard
+  namespace: kagent
+  labels:
+    app: llm-guard
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  selector:
+    app: llm-guard
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

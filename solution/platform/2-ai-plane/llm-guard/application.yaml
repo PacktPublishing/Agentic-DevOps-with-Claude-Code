@@ -1,0 +1,35 @@
+# ABOUTME: ArgoCD Application for the LLM Guard API Deployment and Service.
+# ABOUTME: Raw manifests under manifests/. Syncs into the kagent namespace.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: llm-guard
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/platform/packt-agentic-devops.git
+    targetRevision: main
+    path: platform/2-ai-plane/llm-guard/manifests
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kagent
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
