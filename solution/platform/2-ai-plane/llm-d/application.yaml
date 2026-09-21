@@ -1,0 +1,33 @@
+# ABOUTME: ArgoCD Application for llm-d (Kustomize). Architecture demo, wave 4.
+# ABOUTME: Not deployed on the lean validation cluster; shown on the t3.2xlarge worker.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: llm-d
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/platform/packt-agentic-devops.git
+    targetRevision: main
+    path: platform/2-ai-plane/llm-d/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: llm-d
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

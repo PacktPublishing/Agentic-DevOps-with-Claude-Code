@@ -1,0 +1,31 @@
+# ABOUTME: Reference resource for the llm-d architecture beat. Not a running llm-d.
+# ABOUTME: A reference ConfigMap describing the distributed-inference layer, not a running install.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-d-architecture
+  namespace: llm-d
+  labels:
+    app.kubernetes.io/name: llm-d
+    app.kubernetes.io/part-of: agentic-platform
+    app.kubernetes.io/component: architecture-reference
+data:
+  what: |
+    llm-d is a Kubernetes-native framework for distributed, GPU-accelerated LLM
+    inference. It layers a scheduler and a model-service control plane over vLLM so a
+    single logical model is served across many GPU workers, with prefix-cache-aware
+    routing and disaggregated prefill and decode.
+  where-it-fits: |
+    In this platform llm-d is the scale-out counterpart to the single-node KServe plus
+    vLLM InferenceService (the qwen3 model server). KServe serves one CPU replica for the
+    workshop; llm-d is the pattern you move to when one node is not enough.
+  version: "v0.7.0"
+  maturity: "CNCF Sandbox, pre-1.0. Backed by Red Hat, Google, IBM, CoreWeave, NVIDIA."
+  install: |
+    Upstream, llm-d installs via helm (the llm-d-infra and llm-d-modelservice charts) and
+    the guides in github.com/llm-d/llm-d, onto GPU nodes. There is no monolithic kustomize
+    deploy/ directory.
+  why-reference-only: |
+    This workshop runs on CPU (t3.2xlarge). llm-d's GPU runtime cannot serve here, so it is
+    shown as architecture (beat B12), not run. A real llm-d deployment is a separate GPU
+    effort using the upstream charts.

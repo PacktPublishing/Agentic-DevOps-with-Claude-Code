@@ -1,0 +1,39 @@
+# ABOUTME: ArgoCD Application for the AI-plane Grafana dashboard ConfigMap.
+# ABOUTME: Lands the pre-built dashboard B10/P10 loads; Grafana's sidecar picks it up.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ai-dashboards
+  namespace: argocd
+  annotations:
+    # Observability (kube-prometheus-stack + Grafana) is a foundation app and is up
+    # before the AI plane, so an early wave is safe. The ConfigMap is inert until the
+    # Grafana sidecar reads it.
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/platform/packt-agentic-devops.git
+    targetRevision: main
+    path: platform/2-ai-plane/ai-dashboards/manifests
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    # observability is where Grafana runs; its dashboard sidecar watches this namespace.
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,43 @@
+# ABOUTME: ArgoCD Application for the vLLM Qwen3 InferenceService.
+# ABOUTME: Syncs after KServe is up (wave 4). Needs the t3.2xlarge worker.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vllm
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/platform/packt-agentic-devops.git
+    targetRevision: main
+    path: platform/2-ai-plane/vllm/manifests
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kserve
+  # KServe rewrites the deploymentMode annotation from RawDeployment to its current name
+  # Standard after apply, so ArgoCD sees the annotation as drift and the app never reaches
+  # Synced even though the predictor is Running and serving. Ignore the annotation.
+  ignoreDifferences:
+    - group: serving.kserve.io
+      kind: InferenceService
+      jqPathExpressions:
+        - '.metadata.annotations."serving.kserve.io/deploymentMode"'
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

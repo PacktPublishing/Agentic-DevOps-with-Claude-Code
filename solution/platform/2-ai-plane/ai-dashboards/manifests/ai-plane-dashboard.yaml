@@ -1,0 +1,124 @@
+# ABOUTME: The AI-plane Grafana dashboard as a sidecar-loaded ConfigMap.
+# ABOUTME: Datasource template variables bind at load, so it works on any provisioned Grafana.
+#
+# The Grafana in kube-prometheus-stack runs its dashboard sidecar against the
+# observability namespace and imports any ConfigMap labeled grafana_dashboard=1.
+# Panels use datasource variables (Prometheus + Loki) so they bind to whatever
+# datasources the stack provisioned, rather than hardcoded UIDs. vLLM panels use
+# real vLLM metric names; they populate once Prometheus scrapes the vLLM service.
+# GenAI attributes are OpenTelemetry Development grade, so the trace panel is a link,
+# framed honestly rather than as a stable metric.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-plane-dashboard
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: agentic-platform
+  annotations:
+    grafana_folder: "AI Plane"
+data:
+  ai-plane.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 0,
+      "schemaVersion": 39,
+      "tags": ["ai-plane", "workshop"],
+      "title": "AI Plane",
+      "uid": "ai-plane",
+      "time": {"from": "now-30m", "to": "now"},
+      "templating": {
+        "list": [
+          {
+            "name": "prometheus",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {},
+            "hide": 0,
+            "label": "Prometheus"
+          },
+          {
+            "name": "loki",
+            "type": "datasource",
+            "query": "loki",
+            "current": {},
+            "hide": 0,
+            "label": "Loki"
+          }
+        ]
+      },
+      "panels": [
+        {
+          "type": "text",
+          "title": "About this dashboard",
+          "gridPos": {"h": 3, "w": 24, "x": 0, "y": 0},
+          "options": {
+            "mode": "markdown",
+            "content": "In-cluster vLLM throughput, guardrail activity, and per-agent attribution. GenAI trace attributes follow the OpenTelemetry GenAI semantic conventions, which are Development grade and unstable. vLLM panels populate once Prometheus scrapes the vLLM service."
+          }
+        },
+        {
+          "type": "stat",
+          "title": "vLLM requests running",
+          "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+          "gridPos": {"h": 5, "w": 6, "x": 0, "y": 3},
+          "fieldConfig": {"defaults": {"unit": "short"}},
+          "targets": [
+            {"refId": "A", "expr": "sum(vllm:num_requests_running)"}
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "vLLM requests waiting",
+          "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+          "gridPos": {"h": 5, "w": 6, "x": 6, "y": 3},
+          "fieldConfig": {"defaults": {"unit": "short"}},
+          "targets": [
+            {"refId": "A", "expr": "sum(vllm:num_requests_waiting)"}
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "vLLM token throughput (tokens/s)",
+          "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 3},
+          "fieldConfig": {"defaults": {"unit": "short"}},
+          "targets": [
+            {"refId": "A", "expr": "sum(rate(vllm:prompt_tokens_total[5m]))", "legendFormat": "prompt"},
+            {"refId": "B", "expr": "sum(rate(vllm:generation_tokens_total[5m]))", "legendFormat": "generation"}
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "vLLM time to first token p95 (s)",
+          "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 11},
+          "fieldConfig": {"defaults": {"unit": "s"}},
+          "targets": [
+            {"refId": "A", "expr": "histogram_quantile(0.95, sum(rate(vllm:time_to_first_token_seconds_bucket[5m])) by (le))"}
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Actions per agent identity (5m)",
+          "datasource": {"type": "loki", "uid": "${loki}"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 11},
+          "fieldConfig": {"defaults": {"unit": "short"}},
+          "targets": [
+            {"refId": "A", "expr": "sum by (agent_identity) (count_over_time({job=\"claude-audit\"} | json | agent_identity != `` [5m]))", "legendFormat": "{{agent_identity}}"}
+          ]
+        },
+        {
+          "type": "logs",
+          "title": "Per-agent audit trail",
+          "datasource": {"type": "loki", "uid": "${loki}"},
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 19},
+          "options": {"showTime": true, "wrapLogMessage": true, "dedupStrategy": "none"},
+          "targets": [
+            {"refId": "A", "expr": "{job=\"claude-audit\"} | json | line_format \"{{.agent_identity}}  {{.hook_event_name}}  {{.tool_name}}\""}
+          ]
+        }
+      ]
+    }

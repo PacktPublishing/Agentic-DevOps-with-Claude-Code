@@ -1,0 +1,68 @@
+# ABOUTME: Production Backstage config baked into the platform image. Secrets and hosts
+# ABOUTME: come from env vars injected by the Helm release at runtime, never hardcoded.
+#
+# Verify the ArgoCD and Gitea plugin config keys against the pinned plugin versions
+# before the freeze; plugin config shapes drift between releases.
+app:
+  baseUrl: ${BACKSTAGE_BASE_URL}
+
+backend:
+  baseUrl: ${BACKSTAGE_BASE_URL}
+  listen:
+    port: 7007
+  cors:
+    origin: ${BACKSTAGE_BASE_URL}
+  csp:
+    connect-src: ["'self'", 'http:', 'https:']
+  database:
+    # Ephemeral store. Switch to client: pg for a durable deployment.
+    client: better-sqlite3
+    connection: ':memory:'
+
+integrations:
+  gitea:
+    - host: ${GITEA_HOST}
+      baseUrl: http://${GITEA_HOST}
+      # The token from the gitea-seed Job, injected as an env var.
+      username: ${GITEA_USERNAME}
+      password: ${GITEA_TOKEN}
+
+# In-cluster ArgoCD, surfaced via the proxy and the argo-cd plugin.
+proxy:
+  '/argocd/api':
+    target: https://argocd-server.argocd.svc/api/v1/
+    changeOrigin: true
+    secure: false
+    headers:
+      Cookie: ${ARGOCD_AUTH_TOKEN}
+
+argocd:
+  appLocatorMethods:
+    - type: 'config'
+      instances:
+        - name: in-cluster
+          url: https://argocd-server.argocd.svc
+          token: ${ARGOCD_AUTH_TOKEN}
+
+techdocs:
+  builder: 'local'
+  generator:
+    runIn: 'local'
+  publisher:
+    type: 'local'
+
+auth:
+  environment: production
+  providers:
+    guest:
+      dangerouslyAllowOutsideDevelopment: true
+
+catalog:
+  rules:
+    - allow: [Component, System, API, Resource, Location, Template, Group, User]
+  locations:
+    # The golden-path template, registered so it appears in the scaffolder.
+    - type: url
+      target: http://${GITEA_HOST}/agents/platform-catalog/raw/branch/main/agent-service/template.yaml
+      rules:
+        - allow: [Template]

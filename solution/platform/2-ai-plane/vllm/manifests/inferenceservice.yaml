@@ -1,0 +1,117 @@
+# ABOUTME: vLLM serving Qwen3-1.7B on CPU as a KServe InferenceService.
+# ABOUTME: RawDeployment mode turns this into a Deployment plus Service in kserve.
+#
+# OpenAI-compatible endpoint at :8000/v1. The demo agent's ModelConfig points here,
+# so the platform spends nothing on external LLM APIs. Image is
+# the mirrored CPU build of vllm/vllm-openai-cpu:v0.23.0-x86_64.
+#
+# KVCACHE_SPACE resolved to 2 (RESOLVES the phase-6 "2 to 4" vs components.yaml "8 to 16"
+# conflict). On the single t3.2xlarge student node vLLM shares 32GB with the whole
+# platform. Live testing OOMKilled the pod at KVCACHE 4 with a 10Gi limit, so this pairs
+# KVCACHE 2 with a 16Gi limit: model (~4GB bf16) plus 2GB KV cache plus the warmup peak.
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: qwen3
+  namespace: kserve
+  labels:
+    app: vllm-qwen3
+    version: "0.23.0"
+    app.kubernetes.io/part-of: agentic-platform
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+spec:
+  predictor:
+    containers:
+      - name: kserve-container
+        # Qwen3-baked image (vllm-openai-cpu + Qwen3-1.7B weights, HF_HUB_OFFLINE). Loads
+        # from disk, no HuggingFace download at runtime. Built by images/vllm-qwen3.
+        image: ghcr.io/peopleforrester/vllm-qwen3:v0.23.0-qwen3-1.7b
+        imagePullPolicy: IfNotPresent
+        # The vllm-openai-cpu image is inherently CPU; v0.23 `vllm serve` rejects
+        # --device=cpu (validated live). Do not add it back.
+        args:
+          - "--model=Qwen/Qwen3-1.7B"
+          - "--served-model-name=qwen3-1.7b"
+          - "--dtype=bfloat16"
+          - "--max-model-len=8192"
+          - "--port=8000"
+          # kagent agents run on Google ADK, which attaches function-calling and sends
+          # tool_choice=auto on every request. vLLM rejects that unless tool calling is
+          # enabled, so the agent 400s ('"auto" tool choice requires --enable-auto-tool-choice
+          # and --tool-call-parser to be set') without these two flags. Qwen3's chat template
+          # is Hermes-style, so the hermes parser is the correct one (verified vs vLLM docs).
+          - "--enable-auto-tool-choice"
+          - "--tool-call-parser=hermes"
+        env:
+          # KVCACHE 2 GiB (was 4): model ~4 GiB + KV cache + a memory-heavy warmup run
+          # OOMKilled the pod at the old 10Gi limit (validated live). Keep this and the
+          # raised memory limit together.
+          - name: VLLM_CPU_KVCACHE_SPACE
+            value: "2"
+          # The base vllm-openai-cpu image runs as root and has no home for uid 1001, so
+          # point HOME at a writable dir. vLLM writes its compile and KV caches under HOME.
+          - name: HOME
+            value: /tmp
+          # uid 1001 has no /etc/passwd entry, so torch's getpass.getuser() would crash on
+          # pwd.getpwuid(). Python checks the USER env var first, so setting it avoids the
+          # lookup entirely (the standard arbitrary-UID container pattern).
+          - name: USER
+            value: vllm
+        ports:
+          - name: http
+            containerPort: 8000
+            protocol: TCP
+        resources:
+          requests:
+            cpu: "4"
+            memory: "10Gi"
+          limits:
+            cpu: "6"
+            # 16Gi = measured peak (12.52 GiB, cgroup memory.peak on a t3.2xlarge with
+            # KVCACHE 2) plus ~3.5 GiB headroom. The pod OOMKilled at the old 10Gi limit.
+            # Leaves room on the 32GB student node for the rest of the platform.
+            memory: "16Gi"
+        # The model takes many minutes to load (much longer if not pre-baked). A
+        # startupProbe gives it a wide window so the livenessProbe does not kill the pod
+        # mid-load. 90 x 20s = 30 min; shrink once the model is pre-baked into the image.
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 20
+          failureThreshold: 90
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          failureThreshold: 20
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 120
+          periodSeconds: 30
+        securityContext:
+          # vLLM CPU needs SYS_NICE for thread affinity; drop everything else. The base
+          # image declares a non-numeric root USER, so pin an explicit numeric UID: kubelet
+          # can then verify non-root, and the container runs as 1001 instead of root.
+          runAsNonRoot: true
+          runAsUser: 1001
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+            add: ["SYS_NICE"]
+        volumeMounts:
+          - name: dshm
+            mountPath: /dev/shm
+    # vLLM multiprocessing (EngineCore + Worker) needs a large /dev/shm; the 64Mi container
+    # default makes it stall on "No available shared memory broadcast block" and crashloop.
+    # Validated live: without this the pod restarts repeatedly and never serves.
+    volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 4Gi

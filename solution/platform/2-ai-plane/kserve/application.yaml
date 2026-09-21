@@ -1,0 +1,56 @@
+# ABOUTME: The KServe controller in RawDeployment mode (no Knative, no Istio).
+# ABOUTME: Serves the vLLM InferenceService. Installed after kserve-crd.
+#
+# RawDeployment mode runs InferenceServices as plain Deployments behind the AWS LB
+# Controller, avoiding the Knative and Istio dependency that Serverless mode needs.
+# Confirm the deploymentMode values key against the kserve-resources v0.19.0 chart.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kserve
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ghcr.io/kserve/charts
+    chart: kserve-resources
+    targetRevision: v0.19.0
+    helm:
+      valuesObject:
+        kserve:
+          controller:
+            deploymentMode: RawDeployment
+            gateway:
+              # KServe's ingress defaults assume Istio and Knative: ingressClassName `istio` and a
+              # `knative-serving/knative-local-gateway`. This platform runs neither, on purpose, so
+              # the ingress reconciler can never succeed. The predictor pod comes up 1/1 and the
+              # InferenceService still sits at Ready=False with `Predictor ingress not created`
+              # forever, which reads as a model-serving failure and is not one.
+              #
+              # Nothing needs that ingress. The model is consumed in-cluster at
+              # qwen3-predictor.kserve.svc.cluster.local, and anything outside reaches it through
+              # agentgateway, which is the AI plane's data path by design. Turning ingress creation
+              # off lets KServe report readiness on the thing it actually manages here.
+              #
+              # The chart documents this value as being for raw deployment mode specifically.
+              disableIngressCreation: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kserve
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
