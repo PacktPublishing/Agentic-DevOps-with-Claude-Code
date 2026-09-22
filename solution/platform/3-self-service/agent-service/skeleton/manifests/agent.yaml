@@ -1,0 +1,18 @@
+# Generated kagent Agent. Governed by default: LLM Guard reference, OTel injection,
+# and routing through agentgateway (see httproute.yaml). Model is the in-cluster vLLM.
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: ${{ values.name }}
+  namespace: kagent
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+  annotations:
+    agentic-platform.io/llm-guard-policy: default-injection-scan
+    instrumentation.opentelemetry.io/inject-python: "true"
+spec:
+  type: Declarative
+  declarative:
+    modelConfig: ${{ values.modelConfig }}
+    systemMessage: |
+      ${{ values.systemMessage }}

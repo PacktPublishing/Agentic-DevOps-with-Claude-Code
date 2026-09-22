@@ -1,0 +1,20 @@
+# ABOUTME: One deterministic entry point for ArgoCD into the generated service's manifests.
+# ABOUTME: Without it, ArgoCD recurses the directory and the apply order is whatever it finds.
+#
+# The generated repository is an API between the portal, the ApplicationSet, ArgoCD, kagent, the
+# gateway and Kyverno. Naming the resources here rather than letting a directory scan decide means
+# adding a file to manifests/ is a deliberate act that shows up in review, not a silent change in
+# what gets applied.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - agent.yaml
+  - httproute.yaml
+
+# Every resource the scaffolder generates carries these, so the platform can find a service by the
+# template that made it. The contract test asserts they survive generation.
+commonLabels:
+  app.kubernetes.io/name: ${{ values.name }}
+  app.kubernetes.io/part-of: agent-service
+  agentic-platform.io/generated-by: agent-service-template

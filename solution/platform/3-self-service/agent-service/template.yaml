@@ -1,0 +1,108 @@
+# ABOUTME: Backstage golden-path scaffolder template. Generates an agent-service repo
+# ABOUTME: with a kagent Agent, an agentgateway route, an LLM Guard reference, and OTel.
+#
+# Publish target depends on the workshop's Git host. This uses publish:github with a
+# parameterized repoUrl (the documented default). Swap the publish step for an
+# in-cluster Gitea action, so the golden path works without a GitHub org.
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: agent-service
+  title: Agent Service (governed)
+  description: >-
+    Scaffold a governed agent service: a kagent Agent routed through agentgateway,
+    screened by LLM Guard, instrumented with OpenTelemetry, served by the in-cluster vLLM.
+  tags:
+    - agentic
+    - kagent
+    - recommended
+spec:
+  owner: platform-team
+  type: service
+  parameters:
+    - title: Service
+      required:
+        - name
+        - owner
+      properties:
+        name:
+          title: Name
+          type: string
+          description: Unique name for the agent service (kebab-case).
+          pattern: "^[a-z0-9-]+$"
+          ui:autofocus: true
+        description:
+          title: Description
+          type: string
+          description: What this agent does.
+        owner:
+          title: Owner
+          type: string
+          description: Owning group or user.
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: [Group, User]
+    - title: Agent behavior
+      required:
+        - systemMessage
+      properties:
+        systemMessage:
+          title: System message
+          type: string
+          description: The agent's system message (its standing instructions).
+          ui:widget: textarea
+        modelConfig:
+          title: Model config
+          type: string
+          description: kagent ModelConfig to route to. Defaults to the in-cluster vLLM.
+          default: vllm-qwen3
+    - title: Repository
+      required:
+        - repoUrl
+      properties:
+        repoUrl:
+          title: Repository location
+          type: string
+          ui:field: RepoUrlPicker
+          ui:options:
+            # In-cluster Gitea. Backstage app-config declares an integrations.gitea entry
+            # for this host with a token (see PRD 4 for the Backstage config wiring). The
+            # host is the in-cluster Gitea Service, matching the ApplicationSet generator
+            # api; nothing substitutes it, so it is a literal, not a placeholder.
+            allowedHosts:
+              - gitea-http.gitea.svc:3000
+  steps:
+    - id: fetch
+      name: Fetch skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          name: ${{ parameters.name }}
+          description: ${{ parameters.description }}
+          owner: ${{ parameters.owner }}
+          systemMessage: ${{ parameters.systemMessage }}
+          modelConfig: ${{ parameters.modelConfig }}
+    - id: publish
+      name: Publish to Gitea
+      # Requires @backstage/plugin-scaffolder-backend-module-gitea in the Backstage image
+      # and an integrations.gitea entry in app-config.
+      action: publish:gitea
+      input:
+        repoUrl: ${{ parameters.repoUrl }}
+        description: "Agent service ${{ parameters.name }}"
+        defaultBranch: main
+    - id: register
+      name: Register in catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
+        catalogInfoPath: /catalog-info.yaml
+  output:
+    links:
+      - title: Repository
+        url: ${{ steps.publish.output.remoteUrl }}
+      - title: Open in catalog
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}

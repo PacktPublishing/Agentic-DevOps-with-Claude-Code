@@ -1,0 +1,37 @@
+# Generated route. Traffic to the agent goes through agentgateway, which applies client-certificate
+# mTLS, the LLM Guard guardrail, and an audit access-log record before it reaches the agent.
+#
+# THE BACKEND IS THE AGENT'S OWN SERVICE, NAMED AFTER THE AGENT, ON PORT 8080.
+#
+# kagent creates it. Not the Helm chart, the controller: when it reconciles an Agent CR it builds a
+# Deployment AND a Service, both named after the agent, in the agent's namespace. Verified in
+# kagent v0.9.9 source, go/core/internal/controller/translator/agent/manifest_builder.go
+# (buildWorkloadObjects returns both, with objectMeta() taking Name from m.agent.GetName()) and
+# deployments.go, where the port is `port := int32(8080)` for both the container and the Service.
+#
+# An earlier revision of this file routed to the shared kagent-controller on 8083, on the reasoning
+# that "nothing creates a per-agent Service". That was wrong, and wrong in an instructive way: it
+# came from reading the Helm chart, which ships only the controller's own Service. A Service created
+# by a controller at reconcile time never appears in the chart that installs the controller. The
+# chart was the wrong artifact to answer the question.
+#
+# The revision before that had the right Service name and the wrong port, 80 rather than 8080.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ${{ values.name }}
+  namespace: kagent
+  labels:
+    app.kubernetes.io/part-of: agentic-platform
+spec:
+  parentRefs:
+    - name: agentgateway-proxy
+      namespace: agentgateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /agents/${{ values.name }}
+      backendRefs:
+        - name: ${{ values.name }}
+          port: 8080

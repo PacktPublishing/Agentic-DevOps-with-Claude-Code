@@ -1,0 +1,35 @@
+# Self-service App-of-Apps. Applied live in Module 3. It syncs the ApplicationSet that
+# watches the in-cluster Gitea for scaffolder-generated agent repos and auto-creates an
+# ArgoCD Application per repo (the golden path).
+#
+# Only applicationset.yaml is applied here. agent-service/ is a Backstage scaffolder
+# template loaded by the Backstage catalog, not a Kubernetes manifest, so it is excluded.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-self-service
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/platform/packt-agentic-devops.git
+    targetRevision: main
+    path: platform/3-self-service
+    directory:
+      recurse: false
+      # Both, and the brace glob is load-bearing. This included only applicationset.yaml, so the
+      # AppProject the generated Applications target was never applied and every one of them would
+      # have failed with "project does not exist" while this Application stayed Synced and Healthy.
+      # A manifest that is committed but not in the include list is invisible: nothing reports it.
+      include: "{applicationset.yaml,appproject.yaml}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

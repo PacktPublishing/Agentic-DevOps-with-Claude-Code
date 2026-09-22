@@ -1,0 +1,57 @@
+# ABOUTME: ApplicationSet that deploys every generated agent-service. The SCM generator
+# ABOUTME: finds repos in the in-cluster Gitea org that carry a manifests/ directory.
+#
+# The golden-path template publishes generated repos to in-cluster Gitea. The api URL is
+# the Gitea service; owner is the org the template publishes under. tokenRef points at a
+# Secret in the argocd namespace holding a Gitea API token.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: agent-services
+  annotations:
+    # After the AppProject it generates into.
+    argocd.argoproj.io/sync-wave: "1"
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - scmProvider:
+        gitea:
+          # The org the golden-path scaffolder publishes generated agent repos under, and
+          # that this generator scans for repos carrying a root manifests/ dir. It is the
+          # agents org the gitea-config seed job creates for self-service; nothing
+          # substitutes it, so it is a literal. An unsubstituted REPLACE_GITEA_ORG left the
+          # generator erroring "GetOrgByName" and platform-self-service Degraded.
+          owner: agents
+          api: http://gitea-http.gitea.svc:3000
+          allBranches: false
+          tokenRef:
+            secretName: gitea-scm-token
+            key: token
+        filters:
+          - pathsExist:
+              - manifests
+  template:
+    metadata:
+      name: "agent-{{ .repository }}"
+    spec:
+      # The scoped project, not `default`. `default` permits any repo, any namespace and any
+      # resource kind, which would make the golden path a way to create a cluster-admin-shaped
+      # Application from a template that appears to hand out far less.
+      project: agent-services
+      source:
+        repoURL: "{{ .url }}"
+        targetRevision: "{{ .branch }}"
+        path: manifests
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: kagent
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
