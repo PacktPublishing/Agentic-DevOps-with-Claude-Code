@@ -1,0 +1,17 @@
+# Per-agent attribution over the Claude Code audit stream.
+# Stream label contract: job="claude-audit", every line JSON with an agent_identity field.
+# The audit hook (.claude/hooks/audit.sh) writes those lines; scripts/ship-audit-to-loki.sh
+# pushes them to Loki with the job label. Run in Grafana Explore against the Loki datasource,
+# or with logcli. The `Actions per agent identity` dashboard panel uses query 2 verbatim.
+
+# 1. Raw per-agent audit trail, one readable line per tool invocation.
+{job="claude-audit"} | json | line_format "{{.agent_identity}}  {{.hook_event_name}}  {{.tool_name}}"
+
+# 2. Count of actions per agent identity over the last 5 minutes (the attribution metric).
+sum by (agent_identity) (count_over_time({job="claude-audit"} | json | agent_identity != `` [5m]))
+
+# 3. A single identity in isolation, to show one actor's actions without the others.
+{job="claude-audit"} | json | agent_identity = `claude-code-operator`
+
+# 4. Anything that failed to parse or record, so audit gaps are visible not swallowed.
+{job="claude-audit"} | json | audit_error != ``
