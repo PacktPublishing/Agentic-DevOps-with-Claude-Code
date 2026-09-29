@@ -70,7 +70,7 @@ locals {
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.0"
+  version = "5.21.0"
 
   name = "${var.name}-vpc"
   cidr = "10.0.0.0/16"
@@ -94,7 +94,7 @@ module "vpc" {
 
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 21.0"
+  version = "21.24.0"
 
   name               = var.name
   kubernetes_version = var.kubernetes_version
@@ -218,7 +218,7 @@ module "eks" {
 # keeps EKS in charge of the ordering.
 module "ebs_csi_pod_identity" {
   source  = "terraform-aws-modules/eks-pod-identity/aws"
-  version = "~> 1.0"
+  version = "1.12.1"
 
   name                      = "${var.name}-ebs-csi"
   attach_aws_ebs_csi_policy = true
@@ -232,7 +232,7 @@ module "ebs_csi_pod_identity" {
 # carrying the LB controller policy.
 module "aws_lb_controller_pod_identity" {
   source  = "terraform-aws-modules/eks-pod-identity/aws"
-  version = "~> 1.0"
+  version = "1.12.1"
 
   name                            = "${var.name}-aws-lbc"
   attach_aws_lb_controller_policy = true
