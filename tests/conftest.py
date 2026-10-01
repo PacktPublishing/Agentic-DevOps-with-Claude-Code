@@ -157,11 +157,17 @@ def agent_traffic():
         ns="kagent", timeout=300,
     )
 
+    # Wait for invoke_agent specifically, not for any gen_ai span. invoke_agent is the root of the
+    # turn: it wraps everything else, so it is the last span to close and the last to be exported.
+    # Waiting for any gen_ai span returned as soon as an earlier child span was searchable, and the
+    # trace tests then asked for a root span Tempo had not indexed yet. On book-verify on 2026-10-01
+    # that produced a red phase 5 gate over a trace that was complete and correct 30 seconds later.
+    # Once the root is searchable, every span in the turn is.
     deadline = time.time() + 120
     while time.time() < deadline:
         found = incluster_curl(
             "http://tempo.observability.svc:3200/api/search",
-            "--get", "--data-urlencode", 'q={ span.gen_ai.operation.name != "" }',
+            "--get", "--data-urlencode", 'q={ span.gen_ai.operation.name = "invoke_agent" }',
             ns="observability",
         )
         if "traceID" in found:
