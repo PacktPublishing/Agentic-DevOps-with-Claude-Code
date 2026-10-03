@@ -35,6 +35,10 @@ if ! curl -fsS "http://127.0.0.1:${LOCAL_PORT}/api/v1/version" >/dev/null 2>&1; 
     exit 1
 fi
 
+if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain -- platform)" ]]; then
+    printf 'WARNING: platform/ has uncommitted changes. Only committed work is pushed.\n\n' >&2
+fi
+
 printf 'Pushing %s to the cluster...\n' "${BRANCH}"
 git -C "${REPO_ROOT}" push cluster "HEAD:refs/heads/${BRANCH}"
 

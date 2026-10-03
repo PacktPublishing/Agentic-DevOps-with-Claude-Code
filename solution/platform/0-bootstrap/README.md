@@ -37,8 +37,17 @@ hold your tree before any of them will sync.
 ## The supported path
 
 `./provision/seed-gitea.sh` does the whole bootstrap. It installs Gitea, creates the
-`platform/packt-agentic-devops` repository, pushes your working tree into it, and applies
+`platform/packt-agentic-devops` repository, pushes your **committed** work into it, and applies
 `root-app.yaml`.
+
+Commit `platform/` first. Argo CD reads what you push, not what is on disk, so a `platform/` that
+exists only in your working tree arrives missing and every Application fails on a path that does
+not exist. The script refuses to run until `platform/` is committed:
+
+```bash
+git add platform && git commit -m "Platform working copy"
+./provision/seed-gitea.sh
+```
 
 It works because of one asymmetry: Gitea's own Application pulls its chart from
 `dl.gitea.com`, not from Gitea, so it is the one Application that can be applied before a Git

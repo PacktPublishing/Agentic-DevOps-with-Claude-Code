@@ -80,6 +80,7 @@ terraform -chdir=provision apply          # the cluster
 $(terraform -chdir=provision output -raw update_kubeconfig)
 cp -a solution/platform/. platform/       # or let the agent generate platform/
 ./provision/cluster-facts.sh              # fills in cluster name, VPC id, region
+git add platform && git commit -m "Platform working copy"   # Argo CD reads what you push
 helm install argo-cd ...                  # see solution/platform/0-bootstrap/README.md
 ./provision/seed-gitea.sh                 # installs the Git host, seeds it, starts ArgoCD
 ```

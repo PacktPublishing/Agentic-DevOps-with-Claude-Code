@@ -32,6 +32,17 @@ if grep -rq 'REPLACE_WITH_' "${REPO_ROOT}/platform" 2>/dev/null; then
     exit 2
 fi
 
+# Argo CD reads what is pushed, not what is on disk. This script pushes HEAD, so a platform/ that
+# exists only in the working tree would arrive missing, and every Application would fail on a path
+# that does not exist. Refuse rather than commit on your behalf: commit-then-push is the loop the
+# rest of the build runs on.
+if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain -- platform)" ]]; then
+    printf 'ERROR: platform/ has changes that are not committed.\n' >&2
+    printf 'Argo CD reads what you push, not what is on disk. Commit it first:\n\n' >&2
+    printf '    git add platform && git commit -m "Platform working copy"\n\n' >&2
+    exit 2
+fi
+
 cleanup() {
     if [[ -n "${PF_PID:-}" ]]; then
         kill "${PF_PID}" 2>/dev/null || true
