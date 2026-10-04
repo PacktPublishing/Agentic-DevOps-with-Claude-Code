@@ -27,7 +27,11 @@ for f in "${GITEA_APP}" "${ROOT_APP}"; do
     fi
 done
 
-if grep -rq 'REPLACE_WITH_' "${REPO_ROOT}/platform" 2>/dev/null; then
+# Same definition as provision/cluster-facts.sh: a token on a live line of a manifest. A bare
+# match on the prefix also hits a comment in the reference build and the generated service's
+# contract test, which made this script refuse every real working copy.
+if grep -rnE --include='*.yaml' --include='*.yml' 'REPLACE_WITH_[A-Z_]+' "${REPO_ROOT}/platform" 2>/dev/null \
+        | grep -qvE '^[^:]+:[0-9]+:[[:space:]]*#'; then
     printf 'ERROR: platform/ still has unsubstituted placeholders. Run provision/cluster-facts.sh first.\n' >&2
     exit 2
 fi
