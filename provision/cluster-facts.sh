@@ -94,12 +94,18 @@ while IFS= read -r -d '' file; do
         -e "s|REPLACE_WITH_VPC_ID|${VPC_ID}|g" \
         -e "s|REPLACE_WITH_REGION|${REGION}|g" \
         "${file}"
-done < <(grep -rlZ 'REPLACE_WITH_' "${TARGET}" 2>/dev/null || true)
+done < <(grep -rlZ --include='*.yaml' --include='*.yml' 'REPLACE_WITH_' "${TARGET}" 2>/dev/null || true)
 
 # --- Verify, loudly ----------------------------------------------------------------------------
 # An unsubstituted placeholder leaves the Application Degraded forever, and the sync reports
 # success while it happens. Fail here instead.
-if remaining="$(grep -rn 'REPLACE_WITH_' "${TARGET}" 2>/dev/null)"; then
+#
+# A placeholder is a token on a live line of a manifest. Comments that mention one while
+# explaining a past bug, and the generated service's own contract test, which carries the prefix
+# in the regex it uses to detect placeholders, are neither. Matching them stopped this script on
+# every real working copy.
+if remaining="$(grep -rnE --include='*.yaml' --include='*.yml' 'REPLACE_WITH_[A-Z_]+' "${TARGET}" 2>/dev/null \
+        | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#')"; then
     echo >&2
     echo "ERROR: placeholders survived substitution:" >&2
     echo "${remaining}" >&2

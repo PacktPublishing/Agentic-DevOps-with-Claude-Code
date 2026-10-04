@@ -105,6 +105,9 @@ def test_working_platform_copy_has_no_unsubstituted_placeholders():
             path = os.path.join(root, name)
             with open(path) as handle:
                 for lineno, line in enumerate(handle, 1):
+                    # A comment that names a placeholder while explaining a past bug is not one.
+                    if line.lstrip().startswith("#"):
+                        continue
                     if "REPLACE_WITH_" in line:
                         offenders.append(f"{os.path.relpath(path, REPO_ROOT)}:{lineno}")
     assert not offenders, (
