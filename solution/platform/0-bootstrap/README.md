@@ -21,6 +21,20 @@ why). Run this from the bootstrap directory, or point `--values` at the file's f
 
 The chart and ArgoCD CRDs install cleanly client-side at this size. For the ApplicationSet and Argo Workflows CRDs later, use server-side apply.
 
+## 1b. A default StorageClass
+
+EKS no longer ships a default StorageClass. Every volume claim in this platform that names no
+class, Gitea's, Prometheus's, Loki's, Tempo's and Backstage's, stays Pending without one, and the
+component never schedules. `gp3-storageclass.yaml` defines an encrypted gp3 class on the EBS CSI
+driver and marks it the only default.
+
+`./provision/seed-gitea.sh` applies it as its first step, because Gitea is the first thing that
+needs it. To apply it yourself:
+
+```bash
+kubectl apply -f gp3-storageclass.yaml
+```
+
 ## 2. Apply the plane App-of-Apps (one per module)
 
 The platform is a plane-of-apps: one App-of-Apps per plane, applied at the start of its

@@ -15,11 +15,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GITEA_APP="${REPO_ROOT}/platform/1-foundation/gitea/application.yaml"
 ROOT_APP="${REPO_ROOT}/platform/0-bootstrap/root-app.yaml"
+STORAGE_CLASS="${REPO_ROOT}/platform/0-bootstrap/gp3-storageclass.yaml"
 ORG="platform"
 REPO="packt-agentic-devops"
 LOCAL_PORT="3000"
 
-for f in "${GITEA_APP}" "${ROOT_APP}"; do
+for f in "${GITEA_APP}" "${ROOT_APP}" "${STORAGE_CLASS}"; do
     if [[ ! -f "${f}" ]]; then
         printf 'ERROR: %s not found.\n' "${f}" >&2
         printf 'Create your working copy first:  cp -a solution/platform/. platform/\n' >&2
@@ -55,6 +56,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# --- 0. A default StorageClass ----------------------------------------------------------------
+# EKS no longer ships a default StorageClass, and Gitea's volume claim names none, so without
+# this the claim stays Pending and Gitea never schedules. The same is true of Prometheus, Loki,
+# Tempo and Backstage later. Chapter 3 describes this as part of the bootstrap; this is where the
+# bootstrap does it. Idempotent.
+printf '[0/5] Applying the default gp3 StorageClass...\n'
+kubectl apply -f "${STORAGE_CLASS}"
+
 # --- 1. Install Gitea --------------------------------------------------------------------------
 # Applied directly rather than through the App-of-Apps, because the App-of-Apps is read from the
 # thing this installs. ArgoCD adopts this same object when root-app syncs later, so there is no
@@ -82,6 +91,13 @@ kubectl create secret generic gitea-seed-creds \
 
 # --- 3. Wait for it to answer -------------------------------------------------------------------
 printf '[3/5] Waiting for Gitea to become ready (up to 5 minutes)...\n'
+# kubectl wait fails at once on a resource that does not exist yet rather than waiting for it,
+# and Argo CD creates the Deployment some seconds after the Application is applied. Wait for it
+# to exist first.
+for _ in $(seq 1 36); do
+    kubectl -n gitea get deployment/gitea >/dev/null 2>&1 && break
+    sleep 5
+done
 if ! kubectl wait --for=condition=available --timeout=300s \
         -n gitea deployment/gitea >/dev/null 2>&1; then
     printf 'ERROR: Gitea did not become available. Check: kubectl get pods -n gitea\n' >&2
